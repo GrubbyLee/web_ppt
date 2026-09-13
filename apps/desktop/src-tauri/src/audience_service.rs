@@ -882,7 +882,7 @@ async fn signal_socket(
     Query(query): Query<AudienceJoinQuery>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
 ) -> Response {
-    if !matches!(role.as_str(), "publisher" | "audience" | "local") || !valid_identifier(&peer_id) {
+    if !valid_peer_id_for_role(&role, &peer_id) {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let Some(room) = service.rooms.read().await.get(&session_id).cloned() else {
@@ -988,11 +988,11 @@ async fn handle_signal_socket(
             ))
             .await;
     }
-    let joined = json!({
-        "type": if role == "publisher" { "publisher-ready" } else { "join" },
-        "from": peer_id,
-        "role": role
-    });
+    let joined = if role == "publisher" {
+        json!({ "type": "publisher-ready", "from": peer_id, "role": role })
+    } else {
+        json!({ "type": "join", "from": peer_id, "role": role, "to": "publisher" })
+    };
     let _ = sender.send(joined);
 
     loop {
@@ -1012,7 +1012,7 @@ async fn handle_signal_socket(
                     }
                     continue;
                 }
-                if !matches!(message_type, "join" | "offer" | "answer" | "ice" | "leave" | "publisher-ready" | "preference") {
+                if !valid_client_signal(&role, message_type, value.get("to").and_then(Value::as_str)) {
                     continue;
                 }
                 if let Some(object) = value.as_object_mut() {
@@ -1023,16 +1023,60 @@ async fn handle_signal_socket(
             }
             outgoing_message = receiver.recv() => {
                 let Ok(value) = outgoing_message else { continue };
-                if value.get("from").and_then(Value::as_str) == Some(peer_id.as_str()) { continue; }
+                if !signal_message_is_for_peer(&value, &role, &peer_id) { continue; }
                 if outgoing.send(Message::Text(value.to_string().into())).await.is_err() { break; }
             }
         }
     }
-    let _ = sender.send(json!({ "type": "leave", "from": peer_id, "role": role }));
+    if role != "publisher" {
+        let _ = sender
+            .send(json!({ "type": "leave", "from": peer_id, "role": role, "to": "publisher" }));
+    }
     if role == "audience" {
         room.viewers.write().await.remove(&peer_id);
     }
     drop(audience_guard);
+}
+
+fn valid_peer_id_for_role(role: &str, peer_id: &str) -> bool {
+    matches!(role, "publisher" | "audience" | "local")
+        && valid_identifier(peer_id)
+        && peer_id
+            .strip_prefix(role)
+            .is_some_and(|suffix| suffix.starts_with('-') && suffix.len() > 1)
+}
+
+fn valid_client_signal(role: &str, message_type: &str, target: Option<&str>) -> bool {
+    let Some(target) = target else {
+        return false;
+    };
+    match role {
+        "publisher" => {
+            matches!(message_type, "offer" | "ice")
+                && valid_identifier(target)
+                && (target.starts_with("audience-") || target.starts_with("local-"))
+        }
+        "audience" | "local" => match message_type {
+            "join" | "preference" => target == "publisher",
+            "answer" | "ice" => valid_identifier(target) && target.starts_with("publisher-"),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn signal_message_is_for_peer(value: &Value, role: &str, peer_id: &str) -> bool {
+    if value.get("from").and_then(Value::as_str) == Some(peer_id) {
+        return false;
+    }
+    match value.get("to").and_then(Value::as_str) {
+        Some(target) => target == peer_id || (target == "publisher" && role == "publisher"),
+        None => {
+            let message_type = value.get("type").and_then(Value::as_str);
+            message_type == Some("session-ended")
+                || (message_type == Some("publisher-ready") && matches!(role, "audience" | "local"))
+        }
+    }
 }
 
 fn unix_millis() -> u64 {
@@ -1055,7 +1099,7 @@ const hideMedia=()=>{stream.style.display='none';image.style.display='none';vide
 const isolatedHtml=(content)=>{const policy=`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; script-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'">`;return /<head(?:\s[^>]*)?>/i.test(content)?content.replace(/<head(?:\s[^>]*)?>/i,(head)=>head+policy):policy+content};
 const renderMasks=(items)=>{masks.replaceChildren(...items.slice(0,30).map((mask)=>{const node=document.createElement('span');const x=Math.min(mask.x1,mask.x2);const y=Math.min(mask.y1,mask.y2);node.style.left=`${x*100}%`;node.style.top=`${y*100}%`;node.style.width=`${Math.abs(mask.x2-mask.x1)*100}%`;node.style.height=`${Math.abs(mask.y2-mask.y1)*100}%`;if(mask.mode==='blur')node.className='blur';return node}))};
 const svgNode=(name,values)=>{const node=document.createElementNS('http://www.w3.org/2000/svg',name);Object.entries(values).forEach(([key,value])=>node.setAttribute(key,String(value)));return node};const renderAnnotations=(state)=>{const nodes=(Array.isArray(state?.circles)?state.circles:[]).slice(0,100).map((circle)=>{const x=Math.min(circle.x1,circle.x2);const y=Math.min(circle.y1,circle.y2);return svgNode('ellipse',{cx:x+Math.abs(circle.x2-circle.x1)/2,cy:y+Math.abs(circle.y2-circle.y1)/2,rx:Math.abs(circle.x2-circle.x1)/2,ry:Math.abs(circle.y2-circle.y1)/2})});if(state?.laser&&state.laser.expiresAt>Date.now())nodes.push(svgNode('circle',{cx:state.laser.x,cy:state.laser.y,r:.015}));annotations.replaceChildren(...nodes)};
-const render=()=>{if(!latest)return;const project=latest.project;const state=latest.session;const item=project?.pages?.[state?.currentPageIndex];const mode=state?.screenMode??'normal';document.title=project?.brand?.audienceTitle||'Showit 观众屏';if(/^data:image\/(png|jpeg|webp);base64,/.test(project?.brand?.logoDataUrl||''))favicon.href=project.brand.logoDataUrl;else favicon.removeAttribute('href');document.querySelector('#page').textContent=`${(state?.currentPageIndex??0)+1}/${project?.pages?.length??0}`;document.querySelector('#title').textContent=item?.title??'等待演讲者';document.querySelector('#label').textContent=item?.businessLabel??'';renderMasks(Array.isArray(item?.privacyMasks)?item.privacyMasks:[]);renderAnnotations(state);hideMedia();const useOffline=state?.offlineFallbackPageId===item?.id&&item?.offline;badge.style.display=useOffline?'inline':'none';badge.textContent=project?.brand?.offlineLabel||'离线备用';if(useOffline?.kind==='image'&&/^data:image\/(png|jpeg|webp);base64,/.test(useOffline.dataUrl||'')){image.src=useOffline.dataUrl;image.style.display='block';empty.style.display='none'}else if(useOffline?.kind==='video'&&/^data:video\/(mp4|webm);base64,/.test(useOffline.dataUrl||'')){video.src=useOffline.dataUrl;video.style.display='block';empty.style.display='none';video.play().catch(()=>undefined)}else if(useOffline?.kind==='html'&&typeof useOffline.content==='string'){frame.srcdoc=isolatedHtml(useOffline.content);frame.style.display='block';empty.style.display='none'}else if(hasStream){if(stream.srcObject!==remoteStream)stream.srcObject=remoteStream;stream.style.display='block';stream.play().catch(()=>undefined);empty.style.display='none'}else{empty.style.display='grid'}if(mode==='normal'){frozen.style.display='none';cover.style.display='none'}else{if(mode==='frozen'&&lastMode!=='frozen'&&stream.videoWidth&&stream.videoHeight){frozen.width=stream.videoWidth;frozen.height=stream.videoHeight;frozen.getContext('2d')?.drawImage(stream,0,0,frozen.width,frozen.height)}if(mode==='frozen'&&frozen.width){frozen.style.display='block'}else{frozen.style.display='none'}if(mode==='privacy'){hideMedia();stream.srcObject=null;frozen.getContext('2d')?.clearRect(0,0,frozen.width,frozen.height);frozen.width=0;frozen.height=0}stream.style.display='none';cover.style.display='grid';cover.style.background=mode==='white'?'#fff':mode==='black'?'#050607':mode==='frozen'?'rgb(8 13 18 / 28%)':project?.brand?.statusBackgroundColor||'#18212c';cover.style.color=mode==='white'?'#17212a':'#f5f8fb';document.querySelector('#cover-title').textContent=mode==='ended'?project?.brand?.endTitle||'演示结束':mode==='privacy'?project?.brand?.privacyMessage||'演示准备中':mode==='frozen'?'画面冻结':mode==='white'?'白屏':'黑屏';document.querySelector('#cover-label').textContent=mode==='ended'?project?.brand?.endDescription||'':item?.businessLabel??''}lastMode=mode};
+const render=()=>{if(!latest)return;const project=latest.project;const state=latest.session;const item=latest.page;const mode=state?.screenMode??'normal';document.title=project?.brand?.audienceTitle||'Showit 观众屏';if(/^data:image\/(png|jpeg|webp);base64,/.test(project?.brand?.logoDataUrl||''))favicon.href=project.brand.logoDataUrl;else favicon.removeAttribute('href');document.querySelector('#page').textContent=`${(state?.currentPageIndex??0)+1}/${state?.pageCount??0}`;document.querySelector('#title').textContent=item?.title??'等待演讲者';document.querySelector('#label').textContent=item?.businessLabel??'';renderMasks(Array.isArray(item?.privacyMasks)?item.privacyMasks:[]);renderAnnotations(state);hideMedia();const useOffline=item?.offline;badge.style.display=useOffline?'inline':'none';badge.textContent=project?.brand?.offlineLabel||'离线备用';if(useOffline?.kind==='image'&&/^data:image\/(png|jpeg|webp);base64,/.test(useOffline.dataUrl||'')){image.src=useOffline.dataUrl;image.style.display='block';empty.style.display='none'}else if(useOffline?.kind==='video'&&/^data:video\/(mp4|webm);base64,/.test(useOffline.dataUrl||'')){video.src=useOffline.dataUrl;video.style.display='block';empty.style.display='none';video.play().catch(()=>undefined)}else if(useOffline?.kind==='html'&&typeof useOffline.content==='string'){frame.srcdoc=isolatedHtml(useOffline.content);frame.style.display='block';empty.style.display='none'}else if(hasStream){if(stream.srcObject!==remoteStream)stream.srcObject=remoteStream;stream.style.display='block';stream.play().catch(()=>undefined);empty.style.display='none'}else{empty.style.display='grid'}if(mode==='normal'){frozen.style.display='none';cover.style.display='none'}else{if(mode==='frozen'&&lastMode!=='frozen'&&stream.videoWidth&&stream.videoHeight){frozen.width=stream.videoWidth;frozen.height=stream.videoHeight;frozen.getContext('2d')?.drawImage(stream,0,0,frozen.width,frozen.height)}if(mode==='frozen'&&frozen.width){frozen.style.display='block'}else{frozen.style.display='none'}if(mode==='privacy'){hideMedia();stream.srcObject=null;frozen.getContext('2d')?.clearRect(0,0,frozen.width,frozen.height);frozen.width=0;frozen.height=0}stream.style.display='none';cover.style.display='grid';cover.style.background=mode==='white'?'#fff':mode==='black'?'#050607':mode==='frozen'?'rgb(8 13 18 / 28%)':project?.brand?.statusBackgroundColor||'#18212c';cover.style.color=mode==='white'?'#17212a':'#f5f8fb';document.querySelector('#cover-title').textContent=mode==='ended'?project?.brand?.endTitle||'演示结束':mode==='privacy'?project?.brand?.privacyMessage||'演示准备中':mode==='frozen'?'画面冻结':mode==='white'?'白屏':'黑屏';document.querySelector('#cover-label').textContent=mode==='ended'?project?.brand?.endDescription||'':item?.businessLabel??''}lastMode=mode};
 const closeTransport=()=>{source?.close();source=null;if(pc){pc.onconnectionstatechange=null;pc.close();pc=null}if(sfuRoom){sfuRoom.disconnect();sfuRoom=null}sfuPublication=null;if(ws){ws.onclose=null;ws.close();ws=null}hasStream=false;remoteStream=null;stream.srcObject=null;render()};
 const scheduleReconnect=()=>{if(stopped||terminal||reconnectTimer)return;closeTransport();connection.textContent='重连中';const delay=Math.min(10000,500*2**Math.min(reconnectAttempt++,5));reconnectTimer=setTimeout(()=>{reconnectTimer=0;connect()},delay)};
 const startSource=()=>{source?.close();source=new EventSource(`/events/${sessionId}/${token}/${peerId}`);source.onopen=()=>{connection.textContent='已同步';reconnectAttempt=0};source.onerror=()=>{connection.textContent='重连中'};source.onmessage=(event)=>{try{latest=JSON.parse(event.data);render()}catch{connection.textContent='数据异常'}}};
@@ -1105,6 +1149,51 @@ mod tests {
     }
 
     #[test]
+    fn validates_signal_roles_and_routes_messages_only_to_the_target() {
+        assert!(valid_peer_id_for_role("publisher", "publisher-test"));
+        assert!(!valid_peer_id_for_role("audience", "publisher-test"));
+        assert!(valid_client_signal(
+            "publisher",
+            "offer",
+            Some("audience-one")
+        ));
+        assert!(!valid_client_signal(
+            "audience",
+            "offer",
+            Some("audience-two")
+        ));
+        assert!(!valid_client_signal("audience", "publisher-ready", None));
+        assert!(valid_client_signal(
+            "audience",
+            "answer",
+            Some("publisher-one")
+        ));
+
+        let offer = json!({ "type": "offer", "from": "publisher-one", "to": "audience-one" });
+        assert!(signal_message_is_for_peer(
+            &offer,
+            "audience",
+            "audience-one"
+        ));
+        assert!(!signal_message_is_for_peer(
+            &offer,
+            "audience",
+            "audience-two"
+        ));
+        let join = json!({ "type": "join", "from": "audience-one", "to": "publisher" });
+        assert!(signal_message_is_for_peer(
+            &join,
+            "publisher",
+            "publisher-one"
+        ));
+        assert!(!signal_message_is_for_peer(
+            &join,
+            "audience",
+            "audience-two"
+        ));
+    }
+
+    #[test]
     fn audience_html_uses_a_nonce_and_escaped_format_braces() {
         let html = audience_html("session-test", "token123", "audience", "p2p");
         assert!(html.contains("nonce=\"token123\""));
@@ -1119,6 +1208,8 @@ mod tests {
         assert!(html.contains("${(state?.currentPageIndex??0)+1}"));
         assert!(html.contains("id=\"offline-frame\" title=\"离线备用画面\" sandbox=\"\""));
         assert!(html.contains("script-src 'none'; connect-src 'none'"));
+        assert!(html.contains("const item=latest.page"));
+        assert!(html.contains("state?.pageCount??0"));
         assert!(html.contains("renderMasks(Array.isArray(item?.privacyMasks)"));
         assert!(html.contains("id=\"annotations\""));
         assert!(html.contains("renderAnnotations(state)"));
@@ -1334,7 +1425,7 @@ mod tests {
         .unwrap();
         std::thread::sleep(Duration::from_millis(30));
         let url = format!(
-            "ws://127.0.0.1:{}/signal/session-disconnect-all/{}/audience/viewer-one",
+            "ws://127.0.0.1:{}/signal/session-disconnect-all/{}/audience/audience-one",
             service.local_port, share.token
         );
         let (mut viewer, _) = tungstenite::connect(url.as_str()).unwrap();
@@ -1375,7 +1466,7 @@ mod tests {
                 .unwrap();
             std::thread::sleep(Duration::from_millis(30));
             let url = format!(
-                "ws://127.0.0.1:{}/signal/session-approval/{}/audience/viewer-test?name=Regression",
+                "ws://127.0.0.1:{}/signal/session-approval/{}/audience/audience-test?name=Regression",
                 service.local_port, share.token
             );
             let (mut viewer, _) = tungstenite::connect(url.as_str()).unwrap();
@@ -1392,14 +1483,14 @@ mod tests {
                 Path((
                     "session-approval".to_string(),
                     share.token.clone(),
-                    "viewer-test".to_string(),
+                    "audience-test".to_string(),
                 )),
             )
             .await;
             assert_eq!(denied.status(), StatusCode::FORBIDDEN);
 
             service
-                .decide_viewer("session-approval", "viewer-test", true)
+                .decide_viewer("session-approval", "audience-test", true)
                 .await
                 .unwrap();
             let approved = viewer.read().unwrap().into_text().unwrap();
@@ -1409,13 +1500,13 @@ mod tests {
                 Path((
                     "session-approval".to_string(),
                     share.token.clone(),
-                    "viewer-test".to_string(),
+                    "audience-test".to_string(),
                 )),
             )
             .await;
             assert_eq!(allowed.status(), StatusCode::OK);
             service
-                .disconnect_viewer("session-approval", "viewer-test")
+                .disconnect_viewer("session-approval", "audience-test")
                 .await
                 .unwrap();
         });

@@ -83,6 +83,12 @@ fn is_allowed_business_url(value: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(value) else {
         return false;
     };
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query_pairs().any(|(key, _)| is_sensitive_url_key(&key))
+    {
+        return false;
+    }
     if url.scheme() == "https" {
         return true;
     }
@@ -90,6 +96,22 @@ fn is_allowed_business_url(value: &str) -> bool {
         return false;
     }
     matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+}
+
+fn is_sensitive_url_key(value: &str) -> bool {
+    let normalized = value.to_ascii_lowercase().replace(['-', '_'], "");
+    [
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "cookie",
+        "authorization",
+        "credential",
+        "apikey",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
 }
 
 #[tauri::command]
@@ -1181,6 +1203,12 @@ mod url_tests {
         assert!(is_allowed_business_url("http://localhost:3000/path"));
         assert!(!is_allowed_business_url("http://example.com/path"));
         assert!(!is_allowed_business_url("file:///tmp/private"));
+        assert!(!is_allowed_business_url(
+            "https://demo:password@example.com/path"
+        ));
+        assert!(!is_allowed_business_url(
+            "https://example.com/path?access_token=private"
+        ));
     }
 
     #[test]

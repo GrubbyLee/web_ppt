@@ -83,6 +83,7 @@ function safePageUrl(value) {
 function allowedPageUrl(value) {
   try {
     const url = new URL(value);
+    if (url.username || url.password || [...url.searchParams.keys()].some((key) => /(password|passwd|secret|token|cookie|authorization|credential|api[-_]?key)/i.test(key))) return null;
     return isAllowedOrigin(url.origin) ? url.toString() : null;
   } catch {
     return null;

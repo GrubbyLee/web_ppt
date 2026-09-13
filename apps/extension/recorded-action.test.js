@@ -9,6 +9,8 @@ test("recorded actions only allow bounded non-sensitive stable locators", () => 
   assert.equal(isValidRecordedAction({ type: "click", locator: { strategy: "aria", value: "保存" } }), true);
   assert.equal(isValidRecordedAction({ type: "click", locator: { strategy: "aria", value: "保存" }, value: "secret" }), false);
   assert.equal(isValidRecordedAction({ type: "navigate", url: "javascript:alert(1)" }), false);
+  assert.equal(isValidRecordedAction({ type: "navigate", url: "https://demo:password@example.com/app" }), false);
+  assert.equal(isValidRecordedAction({ type: "navigate", url: "https://example.com/app?token=private" }), false);
   assert.equal(isValidRecordedAction({ type: "fill", locator: { strategy: "id", value: "password" }, input: { source: "sensitive", key: "loginPassword" } }), true);
   assert.equal(isValidRecordedAction({ type: "fill", locator: { strategy: "id", value: "password" }, value: "must-not-persist" }), false);
   assert.equal(isValidExecutionAction({ type: "fill", locator: { strategy: "id", value: "password" }, value: "ephemeral" }), true);

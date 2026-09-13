@@ -12,6 +12,7 @@ import {
   type ProjectVersion,
   type Rehearsal
 } from "@showit/contracts";
+import { createRemoteAudienceSnapshot } from "./remote-audience-snapshot";
 
 const LEGACY_STORAGE_KEY = "showit:workspace:v1";
 const LIBRARY_STORAGE_KEY = "showit:library:v1";
@@ -357,7 +358,7 @@ export async function listAudienceNetworkInterfaces(): Promise<AudienceNetworkIn
 
 export async function startAudienceSession(project: Project, session: PresentationSession, networkAddress?: string): Promise<AudienceShare> {
   if (inTauri()) {
-    return invoke<AudienceShare>("start_audience_session", { sessionId: session.id, snapshot: { project, session }, networkAddress });
+    return invoke<AudienceShare>("start_audience_session", { sessionId: session.id, snapshot: createRemoteAudienceSnapshot(project, session), networkAddress });
   }
   const url = `${window.location.origin}${window.location.pathname}#/audience/${session.id}`;
   return {
@@ -376,7 +377,7 @@ export async function startAudienceSession(project: Project, session: Presentati
 
 export async function publishAudienceSession(project: Project, session: PresentationSession): Promise<void> {
   if (!inTauri()) return;
-  await invoke("publish_audience_session", { sessionId: session.id, snapshot: { project, session } });
+  await invoke("publish_audience_session", { sessionId: session.id, snapshot: createRemoteAudienceSnapshot(project, session) });
 }
 
 export async function stopAudienceSession(sessionId: string): Promise<void> {

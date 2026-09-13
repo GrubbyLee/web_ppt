@@ -40,6 +40,7 @@ function isValidInputSource(input) {
 function isAllowedUrl(value) {
   try {
     const url = new URL(value);
+    if (url.username || url.password || [...url.searchParams.keys()].some((key) => sensitivePattern.test(key))) return false;
     return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
   } catch {
     return false;

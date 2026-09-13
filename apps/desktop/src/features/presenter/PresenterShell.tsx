@@ -364,7 +364,9 @@ export function PresenterShell() {
       totalElapsedMs: session.totalElapsedMs,
       pageElapsedMs: session.pageElapsedMs,
       timerStartedAt: session.timerStartedAt,
-      screenMode: session.screenMode
+      screenMode: session.screenMode,
+      offlineFallbackActive: session.offlineFallbackPageId === currentPage?.id,
+      privacyMasks: currentPage?.privacyMasks.map(({ x1, y1, x2, y2, mode }) => ({ x1, y1, x2, y2, mode })) ?? []
     }).catch(() => undefined);
     if (audienceShare?.sessionId === session.id && audienceShare.signalUrl) {
       sendExtensionMessage({ type: "audience-share", sessionId: session.id, signalUrl: audienceShare.signalUrl, deliveryMode: audienceShare.deliveryMode, sfuUrl: audienceShare.sfuUrl ?? "", sfuToken: audienceShare.sfuToken ?? "" }).catch(() => undefined);

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const sensitiveNamePattern = /(password|passwd|secret|token|cookie|authorization|credential|api[-_]?key)/i;
+
 const identifier = z
   .string()
   .min(1)
@@ -10,7 +12,7 @@ const variableKey = z
   .min(1)
   .max(80)
   .regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/, "变量名必须以字母开头，只能使用字母、数字、下划线和连字符")
-  .refine((value) => !/(password|passwd|secret|token|cookie|authorization|credential|api[-_]?key)/i.test(value), "变量名不能表示密码、Token、Cookie 或密钥");
+  .refine((value) => !sensitiveNamePattern.test(value), "变量名不能表示密码、Token、Cookie 或密钥");
 const runtimeSecretKey = z
   .string()
   .min(1)
@@ -21,6 +23,8 @@ function isAllowedBusinessUrl(value: string): boolean {
   try {
     const url = new URL(value);
     const localHost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (url.username || url.password) return false;
+    if ([...url.searchParams.keys()].some((key) => sensitiveNamePattern.test(key))) return false;
     return url.protocol === "https:" || (url.protocol === "http:" && localHost);
   } catch {
     return false;
@@ -30,7 +34,7 @@ function isAllowedBusinessUrl(value: string): boolean {
 const businessUrl = z
   .string()
   .url("请输入完整的 HTTP(S) URL。")
-  .refine(isAllowedBusinessUrl, "只允许 HTTPS 或已登记的本地开发 Origin。");
+  .refine(isAllowedBusinessUrl, "只允许不含凭据或敏感查询参数的 HTTPS 或已登记本地开发 URL。");
 
 function isAllowedBusinessUrlTemplate(value: string): boolean {
   if (!value.includes("{{")) return isAllowedBusinessUrl(value);
@@ -51,7 +55,7 @@ const businessUrlTemplate = z
   .string()
   .min(1)
   .max(4_000)
-  .refine(isAllowedBusinessUrlTemplate, "URL 模板必须使用 HTTPS 或本机开发 Origin，变量只能出现在路径、查询或 Hash 中。");
+  .refine(isAllowedBusinessUrlTemplate, "URL 模板必须使用 HTTPS 或本机开发 Origin，不能包含凭据或敏感查询参数，变量只能出现在路径、查询或 Hash 中。");
 
 function isAllowedConnectorPath(value: string): boolean {
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[?#]/.test(value)) return false;
@@ -75,7 +79,7 @@ const connectorHeaderName = z
   .min(1)
   .max(80)
   .regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, "Header 名称无效")
-  .refine((value) => !/(authorization|cookie|token|secret|credential|api[-_]?key)/i.test(value), "连接器不能保存认证或密钥 Header")
+  .refine((value) => !sensitiveNamePattern.test(value), "连接器不能保存认证或密钥 Header")
   .refine((value) => {
     const name = value.toLowerCase();
     return ![
@@ -456,7 +460,7 @@ export function validateBusinessUrl(value: string): { valid: boolean; reason?: s
   try {
     const url = new URL(value);
     if (isAllowedBusinessUrl(url.toString())) return { valid: true };
-    return { valid: false, reason: "只允许 HTTPS 或已登记的本地开发 Origin。" };
+    return { valid: false, reason: "只允许不含凭据或敏感查询参数的 HTTPS 或已登记本地开发 URL。" };
   } catch {
     return { valid: false, reason: "请输入完整的 HTTP(S) URL。" };
   }
@@ -465,7 +469,7 @@ export function validateBusinessUrl(value: string): { valid: boolean; reason?: s
 export function validateBusinessUrlTemplate(value: string): { valid: boolean; reason?: string } {
   return isAllowedBusinessUrlTemplate(value)
     ? { valid: true }
-    : { valid: false, reason: "URL 模板必须使用 HTTPS 或本机开发 Origin，变量只能出现在路径、查询或 Hash 中。" };
+    : { valid: false, reason: "URL 模板必须使用 HTTPS 或本机开发 Origin，不能包含凭据或敏感查询参数，变量只能出现在路径、查询或 Hash 中。" };
 }
 
 export function createSessionId(): string {

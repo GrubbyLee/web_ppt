@@ -1,4 +1,5 @@
 import { Room, RoomEvent, Track } from "livekit-client";
+import { createAudienceCompositor, sanitizeAudienceMasks } from "./audience-compositor.js";
 
 const status = document.querySelector("#native-status");
 const title = document.querySelector("#page-title");
@@ -19,11 +20,15 @@ let audienceSfuUrl = "";
 let audienceSfuToken = "";
 let activeSessionId = "";
 let captureStream = null;
+let audienceStream = null;
+let audienceCompositor = null;
 let signalSocket = null;
 let sfuRoom = null;
 let signalReconnectTimer = null;
 let signalReconnectAttempt = 0;
 let currentScreenMode = "normal";
+let currentOfflineFallbackActive = false;
+let currentPrivacyMasks = [];
 let timerState = { timerStatus: "idle", totalElapsedMs: 0, pageElapsedMs: 0, timerStartedAt: null };
 const peers = new Map();
 
@@ -50,6 +55,8 @@ port.onMessage.addListener((message) => {
       timerStartedAt: typeof message.payload.timerStartedAt === "number" ? message.payload.timerStartedAt : null
     };
     currentScreenMode = message.payload.screenMode || "normal";
+    currentOfflineFallbackActive = message.payload.offlineFallbackActive === true;
+    currentPrivacyMasks = sanitizeAudienceMasks(message.payload.privacyMasks);
     updateCapturePrivacy();
     renderTimer();
   }
@@ -148,6 +155,8 @@ async function startCapture(streamId, tabTitle, tabId) {
     });
     stopCapture();
     captureStream = stream;
+    audienceCompositor = createAudienceCompositor(stream, () => ({ screenMode: currentScreenMode, offlineFallbackActive: currentOfflineFallbackActive, privacyMasks: currentPrivacyMasks }));
+    audienceStream = audienceCompositor.stream;
     updateCapturePrivacy();
     port.postMessage({ type: "capture-state", active: true, tabId });
     connectPublisher();
@@ -159,6 +168,7 @@ async function startCapture(streamId, tabTitle, tabId) {
       if (captureStream === stream) stopCapture();
     }, { once: true }));
   } catch (error) {
+    stopCapture();
     meta.textContent = error instanceof Error ? error.message : "标签捕获被拒绝或不可用。";
   }
 }
@@ -182,7 +192,7 @@ function schedulePublisherReconnect(message) {
 }
 
 async function connectSfuPublisher() {
-  if (!captureStream || !audienceSfuUrl || !audienceSfuToken) return;
+  if (!captureStream || !audienceStream || !audienceSfuUrl || !audienceSfuToken) return;
   if (signalReconnectTimer) {
     clearTimeout(signalReconnectTimer);
     signalReconnectTimer = null;
@@ -208,8 +218,8 @@ async function connectSfuPublisher() {
   });
   try {
     await room.connect(audienceSfuUrl, audienceSfuToken, { autoSubscribe: false });
-    if (sfuRoom !== room || !captureStream) return;
-    const videoTrack = captureStream.getVideoTracks()[0];
+    if (sfuRoom !== room || !captureStream || !audienceStream) return;
+    const videoTrack = audienceStream.getVideoTracks()[0];
     if (!videoTrack) throw new Error("没有可投送的视频轨道。");
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.ScreenShare,
@@ -227,7 +237,7 @@ async function connectSfuPublisher() {
 }
 
 function connectP2pPublisher() {
-  if (!captureStream || !audienceSignalUrl) return;
+  if (!captureStream || !audienceStream || !audienceSignalUrl) return;
   if (signalReconnectTimer) {
     clearTimeout(signalReconnectTimer);
     signalReconnectTimer = null;
@@ -263,10 +273,10 @@ function connectP2pPublisher() {
 }
 
 async function createPeer(audienceId) {
-  if (!captureStream || peers.has(audienceId) || !signalSocket || signalSocket.readyState !== WebSocket.OPEN) return;
+  if (!captureStream || !audienceStream || peers.has(audienceId) || !signalSocket || signalSocket.readyState !== WebSocket.OPEN) return;
   const peer = new RTCPeerConnection({ iceServers: [] });
   peers.set(audienceId, peer);
-  captureStream.getTracks().forEach((track) => peer.addTrack(track, captureStream));
+  audienceStream.getTracks().forEach((track) => peer.addTrack(track, audienceStream));
   peer.onicecandidate = (event) => {
     if (event.candidate && signalSocket?.readyState === WebSocket.OPEN) signalSocket.send(JSON.stringify({ type: "ice", to: audienceId, candidate: event.candidate }));
   };
@@ -299,7 +309,7 @@ async function applyPeerQuality(audienceId, mode) {
 }
 
 function updateCapturePrivacy() {
-  const visible = currentScreenMode !== "privacy";
+  const visible = currentScreenMode !== "privacy" && !currentOfflineFallbackActive;
   captureStream?.getVideoTracks().forEach((track) => {
     track.enabled = visible;
   });
@@ -318,6 +328,9 @@ function stopCapture() {
   signalReconnectAttempt = 0;
   captureStream?.getTracks().forEach((track) => track.stop());
   captureStream = null;
+  audienceCompositor?.stop();
+  audienceCompositor = null;
+  audienceStream = null;
   for (const audienceId of peers.keys()) closePeer(audienceId);
   if (signalSocket) {
     signalSocket.onclose = null;

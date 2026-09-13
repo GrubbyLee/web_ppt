@@ -11,11 +11,14 @@ describe("validateBusinessUrl", () => {
     expect(validateBusinessUrl("javascript:alert(1)").valid).toBe(false);
     expect(validateBusinessUrl("data:text/html,unsafe").valid).toBe(false);
     expect(validateBusinessUrl("http://example.com/app").valid).toBe(false);
+    expect(validateBusinessUrl("https://demo:password@example.com/app").valid).toBe(false);
+    expect(validateBusinessUrl("https://example.com/app?access_token=private").valid).toBe(false);
   });
 
   it("allows templates below the URL authority and rejects host interpolation", () => {
     expect(validateBusinessUrlTemplate("https://example.com/customer/{{project.customer}}").valid).toBe(true);
     expect(validateBusinessUrlTemplate("https://{{project.host}}/customer").valid).toBe(false);
+    expect(validateBusinessUrlTemplate("https://example.com/customer?api_key=private").valid).toBe(false);
   });
 });
 
@@ -152,6 +155,8 @@ describe("connector contract", () => {
     expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, requestHeaders: [{ name: "Origin", value: "https://attacker.example" }] }).success).toBe(false);
     expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, requestHeaders: [{ name: "X-Forwarded-Host", value: "attacker.example" }] }).success).toBe(false);
     expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, requestHeaders: [{ name: "Connection", value: "keep-alive" }] }).success).toBe(false);
+    expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, origin: "https://demo:password@example.com" }).success).toBe(false);
+    expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, allowedOrigins: ["https://example.com?token=private"] }).success).toBe(false);
   });
 
   it("rejects ambiguous or traversing login and logout paths", () => {

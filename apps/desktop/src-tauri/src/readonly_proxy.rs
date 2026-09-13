@@ -160,8 +160,30 @@ impl ReadonlyProxyService {
 
 fn allowed_url(value: &str) -> Option<Url> {
     let url = Url::parse(value).ok()?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query_pairs().any(|(key, _)| sensitive_url_key(&key))
+    {
+        return None;
+    }
     let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
     (url.scheme() == "https" || (url.scheme() == "http" && local)).then_some(url)
+}
+
+fn sensitive_url_key(value: &str) -> bool {
+    let normalized = value.to_ascii_lowercase().replace(['-', '_'], "");
+    [
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "cookie",
+        "authorization",
+        "credential",
+        "apikey",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
 }
 
 fn safe_path(path: &str) -> bool {
@@ -415,7 +437,7 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_path, write_allowed, ConnectorHeader, ReadonlyProxyService};
+    use super::{allowed_url, safe_path, write_allowed, ConnectorHeader, ReadonlyProxyService};
     use axum::http::{Method, StatusCode};
     use std::{
         io::{Read, Write},
@@ -459,6 +481,13 @@ mod tests {
         assert!(!safe_path("/login/%2e%2e/admin"));
         assert!(!safe_path("/login/%252e%252e/admin"));
         assert!(!safe_path("/login%2f..%2fadmin"));
+    }
+
+    #[test]
+    fn rejects_urls_with_embedded_or_query_credentials() {
+        assert!(allowed_url("https://example.com/orders").is_some());
+        assert!(allowed_url("https://demo:password@example.com/orders").is_none());
+        assert!(allowed_url("https://example.com/orders?api_key=private").is_none());
     }
 
     #[test]
