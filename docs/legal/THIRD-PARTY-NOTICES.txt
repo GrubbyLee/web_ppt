@@ -1,0 +1,12 @@
+Showit includes the following components for local SFU audience delivery:
+
+LiveKit Server v1.13.6
+Copyright 2024 LiveKit, Inc.
+https://github.com/livekit/livekit
+
+LiveKit JavaScript Client v2.22.3
+Copyright 2024 LiveKit, Inc.
+https://github.com/livekit/client-sdk-js
+
+Both components are licensed under the Apache License, Version 2.0.
+The complete license text is included in APACHE-2.0.txt.

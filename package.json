@@ -1,0 +1,30 @@
+{
+  "name": "showit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Showit local presentation client workspace",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @showit/desktop",
+    "build": "npm run build -ws --if-present && npm run bundle:check",
+    "bundle:check": "node scripts/check-bundle-size.mjs",
+    "bundle:check:extension": "node scripts/check-bundle-size.mjs extension",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "test": "npm run test -ws --if-present",
+    "test:extension-browser": "node scripts/playwright-extension-smoke.mjs",
+    "test:sfu": "npm run livekit:prepare -w @showit/desktop && node scripts/playwright-livekit-smoke.mjs",
+    "tauri:dev": "npm run tauri:dev -w @showit/desktop",
+    "tauri:build": "npm run tauri:build -w @showit/desktop",
+    "native-host:register": "node scripts/register-native-host.mjs",
+    "release:portable-windows": "node scripts/package-windows-portable.mjs",
+    "release:extension": "npm run build -w @showit/extension && npm run bundle:check:extension && node scripts/package-extension.mjs"
+  },
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10"
+  }
+}

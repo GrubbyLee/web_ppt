@@ -1,0 +1,237 @@
+name: Build and verify Showit
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
+      - run: npm ci
+      - run: npm run native-host:prepare -w @showit/desktop
+      - run: npm run livekit:prepare -w @showit/desktop
+      - run: npm run typecheck
+      - run: npm run test
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: npm run build
+      - name: Install Chromium for browser regressions
+        run: npx playwright install --with-deps chromium
+      - name: Run browser, extension and SFU regressions
+        shell: bash
+        run: |
+          npm run dev > /tmp/showit-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              cat /tmp/showit-vite.log
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/playwright-project-workspace.mjs
+          node scripts/playwright-smoke.mjs
+          xvfb-run -a npm run test:extension-browser
+          npm run test:sfu
+
+  linux:
+    needs: quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
+      - run: npm ci
+      - name: Prepare signed release configuration
+        if: github.ref_type == 'tag'
+        env:
+          SHOWIT_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          SHOWIT_UPDATER_PUBKEY: ${{ vars.SHOWIT_UPDATER_PUBKEY }}
+          SHOWIT_EXTENSION_IDS: ${{ vars.SHOWIT_EXTENSION_IDS }}
+        run: node scripts/prepare-release-config.mjs
+      - name: Build Linux packages
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            npm run tauri:build -w @showit/desktop -- --bundles deb,appimage --config target/release/tauri.release.conf.json
+          else
+            npm run tauri:build -w @showit/desktop -- --bundles deb,appimage
+          fi
+      - name: Generate checksums
+        shell: bash
+        run: |
+          find apps/desktop/src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' \) -print0 | while IFS= read -r -d '' file; do
+            sha256sum "$file" > "$file.sha256"
+          done
+      - name: Verify Linux package size and AppImage startup
+        shell: bash
+        run: |
+          limit=$((130 * 1024 * 1024))
+          find apps/desktop/src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' \) -print0 | while IFS= read -r -d '' file; do
+            test "$(stat --format='%s' "$file")" -le "$limit"
+          done
+          appimage=$(find apps/desktop/src-tauri/target/release/bundle -type f -name '*.AppImage' | head -n 1)
+          set +e
+          timeout 15s xvfb-run -a "$appimage" --appimage-extract-and-run
+          exit_code=$?
+          set -e
+          test "$exit_code" -eq 124
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showit-linux-x64
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+            apps/desktop/src-tauri/target/release/bundle/deb/*.sha256
+            apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            apps/desktop/src-tauri/target/release/bundle/appimage/*.sha256
+            apps/desktop/src-tauri/target/release/bundle/appimage/*.tar.gz
+            apps/desktop/src-tauri/target/release/bundle/**/*.sig
+          if-no-files-found: error
+
+  windows:
+    needs: quality
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - name: Prepare signed release configuration
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          SHOWIT_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          SHOWIT_UPDATER_PUBKEY: ${{ vars.SHOWIT_UPDATER_PUBKEY }}
+          SHOWIT_EXTENSION_IDS: ${{ vars.SHOWIT_EXTENSION_IDS }}
+        run: node scripts/prepare-release-config.mjs
+      - name: Build current-user NSIS installer
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            npm run tauri:build -w @showit/desktop -- --bundles nsis --config target/release/tauri.release.conf.json
+          } else {
+            npm run tauri:build -w @showit/desktop -- --bundles nsis
+          }
+      - name: Build portable ZIP
+        run: npm run release:portable-windows -- --source apps/desktop/src-tauri/target/release
+      - name: Generate installer checksum
+        shell: pwsh
+        run: |
+          Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Set-Content -NoNewline "$($_.FullName).sha256"
+          }
+      - name: Verify Windows package size
+        shell: pwsh
+        run: |
+          $limit = 100MB
+          Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object {
+            if ($_.Length -gt $limit) { throw "$($_.Name) exceeds the 100 MiB package budget" }
+          }
+          Get-ChildItem apps/desktop/src-tauri/target/release/bundle/portable/*.zip | ForEach-Object {
+            if ($_.Length -gt $limit) { throw "$($_.Name) exceeds the 100 MiB package budget" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showit-windows-x64
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.sha256
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.zip
+            apps/desktop/src-tauri/target/release/bundle/portable/*.zip
+            apps/desktop/src-tauri/target/release/bundle/portable/*.sha256
+            apps/desktop/src-tauri/target/release/bundle/**/*.sig
+          if-no-files-found: error
+
+  extension:
+    needs: quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build extension twice and verify deterministic output
+        shell: bash
+        run: |
+          npm run release:extension
+          first=$(sha256sum apps/extension/release/*.zip | awk '{print $1}')
+          npm run release:extension
+          second=$(sha256sum apps/extension/release/*.zip | awk '{print $1}')
+          test "$first" = "$second"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showit-extension
+          path: |
+            apps/extension/release/*.zip
+            apps/extension/release/*.sha256
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [linux, windows, extension]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: showit-*
+          path: release-artifacts
+          merge-multiple: true
+      - name: Generate signed update manifest
+        env:
+          SHOWIT_RELEASE_NOTES: Showit 稳定版更新。
+        shell: bash
+        run: |
+          windows_sig=$(find release-artifacts -type f -name '*.sig' | grep -Ei '(^|/).*(nsis|setup|\.exe).*\.sig$' | head -n 1)
+          linux_sig=$(find release-artifacts -type f -name '*.sig' | grep -E '(^|/).*\.AppImage.*\.sig$' | head -n 1)
+          test -n "$windows_sig"
+          test -n "$linux_sig"
+          node scripts/generate-updater-manifest.mjs \
+            --version "$GITHUB_REF_NAME" \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
+            --release-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" \
+            --windows "$windows_sig" \
+            --linux "$linux_sig" \
+            --output release-artifacts/latest.json
+      - name: Publish stable release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-artifacts/**

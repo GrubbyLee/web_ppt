@@ -1,0 +1,7 @@
+{
+  "name": "com.showit.desktop",
+  "description": "Showit Desktop Native Messaging Host",
+  "path": "__SHOWIT_NATIVE_HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://__SHOWIT_EXTENSION_ID__/"]
+}

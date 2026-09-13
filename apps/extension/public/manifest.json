@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Showit Controller",
+  "version": "0.1.0",
+  "description": "Showit 浏览器业务页连接器与演示 Side Panel。",
+  "permissions": ["sidePanel", "tabs", "scripting", "activeTab", "tabCapture", "nativeMessaging", "storage", "declarativeNetRequest"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Showit"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http: https: ws: wss:"
+  }
+}
