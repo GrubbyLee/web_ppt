@@ -48,7 +48,10 @@ try {
   await presenter.getByText("LCAPIM 五角色治理闭环").first().waitFor({ state: "visible" });
   await presenter.getByText("本章计时", { exact: true }).waitFor({ state: "visible" });
   await presenter.locator(".business-frame-wrap iframe").waitFor({ state: "visible" });
-  await presenter.waitForFunction(() => !document.querySelector(".stage-status-strip")?.textContent?.includes("正在检查"));
+  await presenter.waitForFunction(() => {
+    const strip = document.querySelector(".stage-status-strip");
+    return Boolean(strip) && !strip.textContent?.includes("正在检查");
+  });
   assert.match(await presenter.locator(".business-frame-wrap iframe").getAttribute("src") ?? "", /\/console\/\?view=overview$/);
   await presenter.getByText("请先登录 系统管理员 演示账号，然后刷新业务页。", { exact: true }).waitFor({ state: "visible" });
   const accountDirectory = await (await context.request.get(`${appUrl}/api/lc/v1/demo/accounts`)).json();
@@ -144,7 +147,7 @@ try {
   await audience.locator(".audience-freeze-indicator").waitFor({ state: "visible" });
   await presenter.keyboard.press("PageDown");
   await presenter.getByText("LCAPIM 产品与实现边界").first().waitFor({ state: "visible" });
-  await presenter.waitForTimeout(250);
+  await presenter.waitForTimeout(1_200);
   assert.equal(await audience.locator(".audience-status strong").innerText(), frozenAudiencePage);
   assert.equal(await audience.locator(".audience-business-frame").getAttribute("src"), frozenAudienceFrame);
   await presenter.keyboard.press("f");
@@ -188,7 +191,7 @@ try {
   await mobile.locator(".presenter-shell").waitFor({ state: "visible" });
   await assertViewportFit(mobile, "presenter at 375px");
   await mobile.screenshot({ path: resolve(artifacts, "presenter-375.png"), fullPage: true });
-  await context.request.post(`${appUrl}/api/lc/v1/session/logout`, { data: {} });
 } finally {
+  await context.request.post(`${appUrl}/api/lc/v1/session/logout`, { data: {} }).catch(() => undefined);
   await browser.close();
 }

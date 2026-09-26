@@ -35,6 +35,12 @@ export function AnnotationLayer({
   const activeCircles = useMemo(() => (draft ? [...circles, draft] : circles), [circles, draft]);
   const isInteractive = interactive && tool !== "none";
 
+  // Drop an in-progress circle/mask draft when the tool or interactivity
+  // changes mid-drag, otherwise the ghost draft renders forever.
+  useEffect(() => {
+    if (!isInteractive || !["circle", "mask"].includes(tool)) setDraft(null);
+  }, [isInteractive, tool]);
+
   useEffect(() => () => {
     if (laserTimer.current !== null) window.clearTimeout(laserTimer.current);
   }, []);

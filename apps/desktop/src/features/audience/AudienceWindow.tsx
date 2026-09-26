@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useParams } from "react-router-dom";
 import type { PresentationPage, PresentationSession, Project } from "@showit/contracts";
-import { announceAudienceReady, createAudienceChannel, readSnapshot } from "../../lib/audience-sync";
+import { announceAudienceReady, createAudienceChannel } from "../../lib/audience-sync";
 import { screenModeLabel } from "../../lib/format";
 import { AnnotationLayer } from "../presenter/AnnotationLayer";
 import { PrivacyMaskLayer } from "../presenter/PrivacyMaskLayer";
@@ -20,7 +20,10 @@ export function applyAudienceSnapshot(current: AudienceState, snapshot: Audience
   if (!hasReceivedSnapshot) return snapshot;
   const wasFrozen = current.session.screenMode === "frozen";
   const isFrozen = snapshot.session.screenMode === "frozen";
-  if (!wasFrozen && isFrozen) return { ...current, session: { ...current.session, screenMode: "frozen" } };
+  // Entering freeze holds the current visual — but the transient laser pointer
+  // must not linger: snapshots are ignored while frozen, so a laser cleared in
+  // the same update as the freeze would otherwise stay painted until unfreeze.
+  if (!wasFrozen && isFrozen) return { ...current, session: { ...current.session, screenMode: "frozen", laser: null } };
   if (wasFrozen && isFrozen) return current;
   return snapshot;
 }
@@ -65,9 +68,8 @@ function AudienceBusinessPage({ project, page }: { project: Project; page: Prese
 export function AudienceWindow() {
   const params = useParams();
   const sessionId = params.sessionId ?? "";
-  const initial = useMemo<AudienceState | null>(() => sessionId ? readSnapshot(sessionId) : null, [sessionId]);
-  const [state, setState] = useState<AudienceState | null>(initial);
-  const hasReceivedSnapshot = useRef(Boolean(initial));
+  const [state, setState] = useState<AudienceState | null>(null);
+  const hasReceivedSnapshot = useRef(false);
 
   useEffect(() => {
     document.title = state?.project.brand.audienceTitle ?? "Showit 观众屏";
@@ -92,16 +94,18 @@ export function AudienceWindow() {
         return current ? applyAudienceSnapshot(current, snapshot, hadSnapshot) : snapshot;
       }),
       () => undefined,
-      () => setState((current) => current ? { ...current, session: { ...current.session, screenMode: "ended" } } : current)
+      () => setState((current) => current ? { ...current, session: { ...current.session, screenMode: "ended" } } : current),
+      (laser) => setState((current) => current
+        ? current.session.screenMode === "frozen"
+          // A frozen audience screen holds its visual — a delta racing in from
+          // just before the freeze must not repaint it.
+          ? current
+          : { ...current, session: { ...current.session, laser } }
+        : current)
     );
-    announceAudienceReady(channel, initial?.session ?? { id: sessionId, sequence: 0 });
-    const stored = readSnapshot(sessionId);
-    if (stored) {
-      hasReceivedSnapshot.current = true;
-      setState(stored);
-    }
+    announceAudienceReady(channel, { id: sessionId, sequence: 0 });
     return () => channel.close();
-  }, [initial, sessionId]);
+  }, [sessionId]);
 
   if (!state) {
     return <main className="audience-window" aria-label="Showit 观众屏"><section className="audience-cover audience-cover--privacy"><strong>等待演讲者连接</strong><span>此窗口会在演示开始后自动同步画面。</span></section></main>;

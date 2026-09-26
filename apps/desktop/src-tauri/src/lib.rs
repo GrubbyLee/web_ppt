@@ -138,6 +138,7 @@ fn open_external_url(url: String) -> Result<(), String> {
 fn is_safe_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 120
+        && value.chars().next().is_some_and(|character| character.is_ascii_alphanumeric())
         && value.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
         })
@@ -445,29 +446,37 @@ fn open_business_browser(
 }
 
 #[tauri::command]
-fn dedicated_browser_profile_status(
+async fn dedicated_browser_profile_status(
     app: AppHandle,
     project_id: String,
 ) -> Result<BrowserProfileStatus, String> {
     let path = dedicated_profile_path(&app, &project_id)?;
-    Ok(BrowserProfileStatus {
-        exists: path.is_dir(),
-        bytes: directory_size(&path),
-    })
+    let exists = path.is_dir();
+    // Walking a full browser profile can take seconds — keep it off the main
+    // thread so the UI does not stall behind this command.
+    let bytes = tauri::async_runtime::spawn_blocking(move || directory_size(&path))
+        .await
+        .map_err(|_| "无法统计专用浏览器目录".to_string())?;
+    Ok(BrowserProfileStatus { exists, bytes })
 }
 
 #[tauri::command]
-fn clear_dedicated_browser_profile(app: AppHandle, project_id: String) -> Result<(), String> {
+async fn clear_dedicated_browser_profile(app: AppHandle, project_id: String) -> Result<(), String> {
     let path = dedicated_profile_path(&app, &project_id)?;
-    if let Ok(metadata) = fs::symlink_metadata(&path) {
-        if metadata.file_type().is_symlink() {
-            fs::remove_file(path).map_err(|error| error.to_string())?;
-        } else if metadata.is_dir() {
-            fs::remove_dir_all(path)
-                .map_err(|error| format!("无法清理专用浏览器目录，请先关闭该浏览器: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() {
+                fs::remove_file(path).map_err(|error| error.to_string())?;
+            } else if metadata.is_dir() {
+                fs::remove_dir_all(path).map_err(|error| {
+                    format!("无法清理专用浏览器目录，请先关闭该浏览器: {error}")
+                })?;
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|_| "无法清理专用浏览器目录".to_string())?
 }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -541,10 +550,14 @@ fn list_workspaces(app: AppHandle) -> Result<Vec<WorkspaceRecord>, String> {
         .map_err(|error| error.to_string())?;
     let mut workspaces = Vec::new();
     for record in records {
-        let content = record.map_err(|error| error.to_string())?;
-        let workspace = serde_json::from_str(&content)
-            .map_err(|error| format!("本地项目数据格式无效: {error}"))?;
-        workspaces.push(workspace);
+        let Ok(content) = record else { continue };
+        // One corrupt row must not blank the whole project list — skip it and
+        // keep the intact rows renderable; the per-id load still surfaces the
+        // error for that project.
+        match serde_json::from_str(&content) {
+            Ok(workspace) => workspaces.push(workspace),
+            Err(error) => eprintln!("跳过无法解析的本地项目数据: {error}"),
+        }
     }
     Ok(workspaces)
 }
@@ -742,6 +755,21 @@ fn delete_workspace(app: AppHandle, project_id: String) -> Result<(), String> {
     connection
         .execute(
             "DELETE FROM settings WHERE key = 'active_project_id' AND value = ?1",
+            params![project_id],
+        )
+        .map_err(|error| error.to_string())?;
+    // "此操作无法恢复" must hold for the whole project: version snapshots and
+    // rehearsal history would otherwise outlive the delete and bleed into a
+    // re-imported project with the same id.
+    connection
+        .execute(
+            "DELETE FROM project_versions WHERE project_id = ?1",
+            params![project_id],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "DELETE FROM rehearsals WHERE project_id = ?1",
             params![project_id],
         )
         .map_err(|error| error.to_string())?;
@@ -1241,6 +1269,10 @@ mod url_tests {
         assert!(is_safe_identifier("project-demo-1"));
         assert!(!is_safe_identifier("../project"));
         assert!(!is_safe_identifier("project/demo"));
+        assert!(!is_safe_identifier("."));
+        assert!(!is_safe_identifier(".."));
+        assert!(!is_safe_identifier("..."));
+        assert!(!is_safe_identifier(".hidden"));
     }
 
     #[test]

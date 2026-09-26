@@ -83,7 +83,7 @@ describe("presentation launch snapshot", () => {
     expect(launch.project.pages[0]?.id).toBe(project.pages[0]?.id);
   });
 
-  it("clears page-local state when applying editor changes removes the current page", () => {
+  it("clears page-local state and advances to the next page when applying editor changes removes the current page", () => {
     const session = createSession(sampleProject);
     session.currentPageIndex = 1;
     session.annotationTool = "circle";
@@ -98,7 +98,8 @@ describe("presentation launch snapshot", () => {
 
     const applied = applyProjectToPresentation(running, latest);
 
-    expect(applied.session.currentPageIndex).toBe(0);
+    expect(applied.session.currentPageIndex).toBe(1);
+    expect(applied.project.pages[applied.session.currentPageIndex]?.id).toBe(sampleProject.pages[2]!.id);
     expect(applied.session.annotationTool).toBe("none");
     expect(applied.session.circles).toEqual([]);
     expect(applied.session.laser).toBeNull();

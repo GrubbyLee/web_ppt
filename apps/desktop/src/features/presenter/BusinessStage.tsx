@@ -108,7 +108,11 @@ export function BusinessStage({
     .map((grant) => grant.origin);
   const opensInFrame = !connector || connector.mode === "iframe";
   const frameTargetUrl = requiresReadonlyProxy ? proxyUrl : activeUrlValue;
-  const canRenderFrame = Boolean(!offlineActive && frameOpen && opensInFrame && frameTargetUrl && session.screenMode === "normal");
+  // Keep the frame mounted across audience screen modes: the .screen-cover
+  // overlay conceals it visually, and unmounting would destroy the live
+  // business page state (login, SPA state) every time the presenter toggles
+  // freeze/blackout and back.
+  const canRenderFrame = Boolean(!offlineActive && frameOpen && opensInFrame && frameTargetUrl);
   const connectionLabel = connectorState
     ? connectorState.state === "ready" ? "扩展已就绪"
       : connectorState.state === "anonymous" ? "需要登录"
@@ -200,7 +204,7 @@ export function BusinessStage({
     setFrameState("loading");
     const timeout = window.setTimeout(() => setFrameState((state) => state === "loading" ? "error" : state), 12_000);
     return () => window.clearTimeout(timeout);
-  }, [canRenderFrame, frameKey, usingFallback]);
+  }, [canRenderFrame, frameKey, page.id, usingFallback]);
 
   useEffect(() => {
     if (frameState !== "error" || !activeUrl?.ok) return;

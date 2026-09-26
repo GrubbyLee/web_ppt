@@ -99,7 +99,15 @@ export function applyProjectToPresentation(workspace: Workspace, latestProject: 
   const project = runnableProject(latestProject);
   if (project.id !== workspace.project.id) throw new Error("项目与当前演示会话不匹配。");
   const currentPageId = workspace.project.pages[workspace.session.currentPageIndex]?.id;
-  const currentPageIndex = Math.max(0, currentPageId ? project.pages.findIndex((page) => page.id === currentPageId) : 0);
+  // When the current page disappeared, advance to the next enabled page
+  // instead of throwing the presenter back to the cover page mid-talk —
+  // mirroring the recovery path in runtimeSession().
+  const directIndex = currentPageId ? project.pages.findIndex((page) => page.id === currentPageId) : -1;
+  const successor = workspace.project.pages
+    .slice(workspace.session.currentPageIndex + 1)
+    .find((page) => page.enabled);
+  const successorIndex = successor ? project.pages.findIndex((page) => page.id === successor.id) : -1;
+  const currentPageIndex = directIndex >= 0 ? directIndex : successorIndex >= 0 ? successorIndex : 0;
   const activePageId = project.pages[currentPageIndex]?.id;
   const stayedOnPage = activePageId === currentPageId;
   const stayedInSection = workspace.project.pages[workspace.session.currentPageIndex]?.section === project.pages[currentPageIndex]?.section;

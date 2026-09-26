@@ -360,6 +360,7 @@
 }
 
 .business-frame-wrap {
+  --stage-strip-height: 28px;
   position: relative;
   grid-row: 3;
   min-width: 0;
@@ -376,7 +377,7 @@
   left: 0;
   justify-content: space-between;
   gap: 12px;
-  min-height: 28px;
+  min-height: var(--stage-strip-height);
   padding: 0 10px;
   color: #537083;
   background: rgb(245 248 251 / 91%);
@@ -410,7 +411,7 @@
   width: 100%;
   height: 100%;
   border: 0;
-  padding-top: 28px;
+  padding-top: var(--stage-strip-height);
   background: var(--paper-50);
 }
 
@@ -498,12 +499,16 @@
   background: #11161c;
 }
 
+/* Align with the iframe content box (below the status strip) so normalized
+   annotation coordinates match the audience frame; the audience window has no
+   strip and falls back to a full-cover layer. */
 .annotation-layer {
   position: absolute;
   z-index: 6;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  top: var(--stage-strip-height, 0px);
+  right: 0;
+  bottom: 0;
+  left: 0;
   pointer-events: none;
   touch-action: none;
 }
@@ -552,7 +557,10 @@
 .privacy-mask-layer {
   position: absolute;
   z-index: 7;
-  inset: 0;
+  top: var(--stage-strip-height, 0px);
+  right: 0;
+  bottom: 0;
+  left: 0;
   pointer-events: none;
 }
 

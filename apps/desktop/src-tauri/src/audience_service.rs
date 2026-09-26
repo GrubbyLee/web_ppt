@@ -291,12 +291,20 @@ impl AudienceService {
                 return Err("当前观众会话已使用另一种容量模式启动，请先停止分享后重试".to_string());
             }
         }
+        // SFU startup binds sockets, writes config and polls readiness for up
+        // to six seconds — keep that blocking work off the async runtime.
         let sfu = if delivery_mode == AudienceDeliveryMode::Sfu {
+            let manager = self.sfu.clone();
+            let session = session_id.to_string();
             Some(
-                self.sfu
-                    .lock()
-                    .map_err(|_| "本地 SFU 状态不可用".to_string())?
-                    .start_session(session_id, address)?,
+                tauri::async_runtime::spawn_blocking(move || {
+                    manager
+                        .lock()
+                        .map_err(|_| "本地 SFU 状态不可用".to_string())?
+                        .start_session(&session, address)
+                })
+                .await
+                .map_err(|_| "本地 SFU 启动任务失败".to_string())??,
             )
         } else {
             None
@@ -534,6 +542,7 @@ impl AudienceService {
 fn valid_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 120
+        && value.chars().next().is_some_and(|character| character.is_ascii_alphanumeric())
         && value.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
         })
@@ -607,7 +616,17 @@ impl SfuManager {
         let config = format!(
             "port: {api_port}\nbind_addresses:\n  - \"{address}\"\nrtc:\n  udp_port: {rtc_udp_port}\n  tcp_port: {rtc_tcp_port}\n  use_external_ip: false\n  use_mdns: false\n  stun_servers: []\nkeys:\n  \"{api_key}\": \"{api_secret}\"\nroom:\n  empty_timeout: 60\n  departure_timeout: 10\n  max_participants: 21\nturn:\n  enabled: false\nlogging:\n  level: warn\n"
         );
-        std::fs::write(&config_path, config)
+        // The config carries the SFU API secret — never write it world-readable.
+        let mut config_options = std::fs::OpenOptions::new();
+        config_options.create(true).truncate(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            config_options.mode(0o600);
+        }
+        config_options
+            .open(&config_path)
+            .and_then(|mut file| std::io::Write::write_all(&mut file, config.as_bytes()))
             .map_err(|error| format!("无法写入 SFU 配置: {error}"))?;
         drop(api_reservation);
         drop(rtc_tcp_reservation);
@@ -939,7 +958,17 @@ async fn signal_socket(
             },
         );
     }
+    // If the upgrade fails the on_upgrade callback (and the audience capacity
+    // guard it owns) is dropped, but the viewer registry entry inserted above
+    // needs explicit cleanup.
+    let failed_room = room.clone();
+    let failed_peer_id = peer_id.clone();
     upgrade
+        .on_failed_upgrade(move |_error| {
+            tauri::async_runtime::spawn(async move {
+                failed_room.viewers.write().await.remove(&failed_peer_id);
+            });
+        })
         .on_upgrade(move |socket| handle_signal_socket(socket, room, role, peer_id, audience_guard))
 }
 
@@ -1025,6 +1054,9 @@ async fn handle_signal_socket(
                 let Ok(value) = outgoing_message else { continue };
                 if !signal_message_is_for_peer(&value, &role, &peer_id) { continue; }
                 if outgoing.send(Message::Text(value.to_string().into())).await.is_err() { break; }
+                // The presenter stopped the session — deliver the notice, then
+                // close the socket instead of holding it open forever.
+                if value.get("type").and_then(Value::as_str) == Some("session-ended") { break; }
             }
         }
     }
@@ -1146,6 +1178,9 @@ mod tests {
         assert!(valid_identifier("session-test-1"));
         assert!(!valid_identifier("../session"));
         assert!(!valid_identifier(""));
+        assert!(!valid_identifier("."));
+        assert!(!valid_identifier(".."));
+        assert!(!valid_identifier(".hidden"));
     }
 
     #[test]

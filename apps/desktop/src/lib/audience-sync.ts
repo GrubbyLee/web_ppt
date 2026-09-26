@@ -1,8 +1,6 @@
-import { AudienceEventSchema, type AudienceEvent, type PresentationSession, type Project } from "@showit/contracts";
+import { AudienceEventSchema, type AudienceEvent, type LaserPoint, type PresentationSession, type Project } from "@showit/contracts";
 
-const storageKey = (sessionId: string) => `showit:audience:${sessionId}`;
 const channelName = (sessionId: string) => `showit:audience:${sessionId}`;
-const snapshotCacheLimit = 1_500_000;
 
 function nonce(): string {
   return `${Date.now().toString(36)}-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`;
@@ -18,28 +16,36 @@ export function publishSnapshot(project: Project, session: PresentationSession):
     project,
     session
   };
-  let cached = false;
-  try {
-    const serialized = JSON.stringify(event);
-    if (serialized.length <= snapshotCacheLimit) {
-      localStorage.setItem(storageKey(session.id), serialized);
-      cached = true;
-    }
-  } catch {
-    // A live BroadcastChannel snapshot is still available when browser cache is full.
-  }
   const channel = new BroadcastChannel(channelName(session.id));
   channel.postMessage(event);
   channel.close();
-  if (cached) localStorage.removeItem(storageKey(session.id));
 }
 
-export function canCacheAudienceSnapshot(value: unknown): boolean {
-  try {
-    return JSON.stringify(value).length <= snapshotCacheLimit;
-  } catch {
-    return false;
+// Returns undefined when the change is more than a laser move (a full snapshot
+// must be published), the moved laser point, or null when the laser cleared.
+export function laserOnlyChange(previous: PresentationSession, next: PresentationSession): LaserPoint | null | undefined {
+  if (previous.laser === next.laser) return undefined;
+  for (const key of Object.keys(next) as Array<keyof PresentationSession>) {
+    if (key === "laser" || key === "sequence") continue;
+    if (previous[key] !== next[key]) return undefined;
   }
+  return next.laser;
+}
+
+// Laser moves arrive at up to ~30 Hz; publish the tiny delta instead of
+// cloning the whole project for every throttled pointer sample.
+export function publishLaser(session: PresentationSession, laser: LaserPoint | null): void {
+  const event = {
+    type: "laser" as const,
+    sessionId: session.id,
+    seq: session.sequence,
+    nonce: nonce(),
+    at: Date.now(),
+    laser
+  };
+  const channel = new BroadcastChannel(channelName(session.id));
+  channel.postMessage(event);
+  channel.close();
 }
 
 export function publishBye(session: PresentationSession): void {
@@ -55,22 +61,12 @@ export function publishBye(session: PresentationSession): void {
   channel.close();
 }
 
-export function readSnapshot(sessionId: string): { project: Project; session: PresentationSession } | null {
-  try {
-    const parsed = AudienceEventSchema.safeParse(JSON.parse(localStorage.getItem(storageKey(sessionId)) ?? "null"));
-    return parsed.success && parsed.data.type === "snapshot"
-      ? { project: parsed.data.project, session: parsed.data.session }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 export function createAudienceChannel(
   sessionId: string,
   onSnapshot: (snapshot: { project: Project; session: PresentationSession }) => void,
   onReady: () => void,
-  onBye: () => void = () => undefined
+  onBye: () => void = () => undefined,
+  onLaser: (laser: LaserPoint | null) => void = () => undefined
 ): BroadcastChannel {
   const channel = new BroadcastChannel(channelName(sessionId));
   const accepts = createAudienceEventGuard(sessionId);
@@ -78,6 +74,7 @@ export function createAudienceChannel(
     const parsed = AudienceEventSchema.safeParse(event.data);
     if (!parsed.success || !accepts(parsed.data)) return;
     if (parsed.data.type === "snapshot") onSnapshot({ project: parsed.data.project, session: parsed.data.session });
+    if (parsed.data.type === "laser") onLaser(parsed.data.laser);
     if (parsed.data.type === "ready") onReady();
     if (parsed.data.type === "bye") onBye();
   };

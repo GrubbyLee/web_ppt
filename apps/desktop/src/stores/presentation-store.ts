@@ -398,6 +398,7 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         circles: [],
         laser: null,
         offlineFallbackPageId: null,
+        offlineNetworkGrants: [],
         pendingHighRiskStepId: null
       })
     })),
@@ -560,6 +561,9 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         screenMode: "ended",
         annotationTool: "none",
         laser: null,
+        // Offline network grants are per-run consent — do not leave origins
+        // pre-authorized for the next presentation or rehearsal.
+        offlineNetworkGrants: [],
         pendingHighRiskStepId: null
       })
     }))

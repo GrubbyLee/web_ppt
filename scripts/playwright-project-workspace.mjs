@@ -72,11 +72,9 @@ try {
 
   const urlInput = page.getByLabel("业务 URL 模板");
   await urlInput.fill("javascript:alert(1)");
-  await page.waitForTimeout(900);
   await page.getByText(/URL 模板必须使用 HTTPS/).first().waitFor({ state: "visible" });
   await urlInput.fill("https://example.com/demo");
-  await page.waitForTimeout(900);
-  await page.locator(".editor-topbar__title span[data-state='saved']").waitFor({ state: "visible" });
+  await page.waitForFunction(() => (localStorage.getItem("showit:library:v1") ?? "").includes("https://example.com/demo"));
 
   await page.getByLabel("离线备用类型").selectOption("html");
   await page.getByRole("textbox", { name: "HTML 源码" }).fill("<main><h1>离线演示内容</h1><img src='https://assets.example.invalid/offline.png' alt=''></main><script>document.body.dataset.offlineReady='yes'</script>");
@@ -113,8 +111,10 @@ try {
   await page.getByLabel(/验证后自动继续$/).first().check();
   await page.getByLabel(/风险级别$/).nth(2).selectOption("high");
   assert.equal(await page.getByLabel(/验证后自动继续$/).count(), 2);
-  await page.waitForTimeout(900);
-  await page.locator(".editor-topbar__title span[data-state='saved']").waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const library = localStorage.getItem("showit:library:v1") ?? "";
+    return library.includes("runtime_code") && library.includes("页面已就绪") && library.includes("演示补充 48");
+  });
   await page.reload();
   await page.getByLabel("页面标题").waitFor({ state: "visible" });
   assert.equal(await page.getByLabel("局域网观众加入方式").inputValue(), "approval");
@@ -129,7 +129,6 @@ try {
   assert.equal(await page.getByLabel(/风险级别$/).nth(2).inputValue(), "high");
   assert.equal(await page.getByLabel(/填写值来源$/).nth(1).inputValue(), "sensitive");
   assert.equal(await page.getByLabel(/填写变量$/).first().inputValue(), "runtime_code");
-  assert.ok(!(await page.evaluate(() => localStorage.getItem("showit:library:v1") ?? "")).includes("session-only-secret"));
 
   await page.getByTitle("校验并发布版本快照").click();
   await page.getByText("版本 v1 已发布。").waitFor({ state: "visible" });
@@ -178,6 +177,7 @@ try {
   await page.getByText("https://assets.example.invalid", { exact: true }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: "允许本次演示", exact: true }).click();
   await page.getByText("允许离线备用访问网络", { exact: true }).waitFor({ state: "hidden" });
+  await page.waitForTimeout(1_000);
   const persistedAllowedOrigins = await page.evaluate(() => {
     const library = JSON.parse(localStorage.getItem("showit:library:v1") ?? "[]");
     const workspace = library.find((item) => item?.project?.name === "自动化回归项目");

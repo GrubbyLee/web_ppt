@@ -7,14 +7,43 @@ const HOST_NAME = "com.showit.desktop";
 const DIAGNOSTIC_STORAGE_KEY = "showit:extension-diagnostics:v1";
 const DIAGNOSTIC_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_DIAGNOSTIC_ENTRIES = 500;
+const STATE_STORAGE_KEY = "showit:background-state:v1";
+const PROTECTION_RULE_ID_MIN = 910_000;
+const PROTECTION_RULE_ID_MAX = 910_100;
 let nativePort = null;
 let activeSessionId = null;
-let protectionRuleIds = [];
 let recorder = null;
 let diagnosticWrite = Promise.resolve();
 let captureTabId = null;
 let captureActive = false;
+let captureOrigin = null;
 const sidePanelPorts = new Set();
+
+function persistRuntimeState() {
+  void chrome.storage.session.set({ [STATE_STORAGE_KEY]: {
+    activeSessionId,
+    captureActive,
+    captureTabId,
+    captureOrigin,
+    recorder
+  } }).catch(() => undefined);
+}
+
+void chrome.storage.session.get(STATE_STORAGE_KEY).then((stored) => {
+  const state = stored?.[STATE_STORAGE_KEY];
+  if (!state) return;
+  if (typeof state.activeSessionId === "string") activeSessionId = state.activeSessionId;
+  if (state.captureActive === true && Number.isInteger(state.captureTabId)) {
+    void chrome.tabs.get(state.captureTabId).then(() => {
+      captureActive = true;
+      captureTabId = state.captureTabId;
+      captureOrigin = typeof state.captureOrigin === "string" ? state.captureOrigin : null;
+    }).catch(() => undefined);
+  }
+  if (state.recorder && typeof state.recorder.recordingId === "string" && Number.isInteger(state.recorder.tabId)) {
+    recorder = { recordingId: state.recorder.recordingId, tabId: state.recorder.tabId, lastUrl: typeof state.recorder.lastUrl === "string" ? state.recorder.lastUrl : "" };
+  }
+}).catch(() => undefined);
 
 function isAllowedOrigin(origin) {
   try {
@@ -97,12 +126,14 @@ async function startRecorder(message) {
   const result = await chrome.tabs.sendMessage(tab.id, { type: "showit-recorder-start", recordingId });
   if (!result?.ok) throw new Error("业务标签未加载 Showit 连接器。");
   recorder = { recordingId, tabId: tab.id, lastUrl: safePageUrl(tab.url || "") };
+  persistRuntimeState();
   sendNative({ type: "action-recorder-state", recordingId, active: true, pageTitle: String(result.title || "").slice(0, 160) });
 }
 
 async function stopRecorder(message) {
   const current = recorder;
   recorder = null;
+  persistRuntimeState();
   if (current?.tabId) await chrome.tabs.sendMessage(current.tabId, { type: "showit-recorder-stop" }).catch(() => undefined);
   sendNative({ type: "action-recorder-state", recordingId: typeof message.recordingId === "string" ? message.recordingId : current?.recordingId || "", active: false });
 }
@@ -174,13 +205,17 @@ async function cancelPrivacyMaskPicker() {
   if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: "showit-cancel-privacy-mask" }).catch(() => undefined);
 }
 
+async function currentProtectionRuleIds() {
+  const rules = await chrome.declarativeNetRequest.getDynamicRules();
+  return rules.map((rule) => rule.id).filter((id) => id >= PROTECTION_RULE_ID_MIN && id < PROTECTION_RULE_ID_MAX);
+}
+
 async function configureRequestProtection(message) {
   const sessionId = typeof message.sessionId === "string" ? message.sessionId : "";
   const origin = typeof message.origin === "string" && isAllowedOrigin(message.origin) ? new URL(message.origin).origin : null;
   const securityMode = message.securityMode === "request-protection" ? "request-protection" : "interactive";
   const allowedPaths = sanitizeProtectionPaths([...(Array.isArray(message.loginPaths) ? message.loginPaths : []), ...(Array.isArray(message.logoutPaths) ? message.logoutPaths : [])]);
-  const removeRuleIds = protectionRuleIds;
-  protectionRuleIds = [];
+  const removeRuleIds = await currentProtectionRuleIds();
   if (!origin || securityMode === "interactive") {
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds });
     sendNative({ type: "request-protection-state", sessionId, enabled: false });
@@ -188,13 +223,13 @@ async function configureRequestProtection(message) {
   }
 
   const addRules = buildProtectionRules(origin, allowedPaths);
-  protectionRuleIds = addRules.map((rule) => rule.id);
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds, addRules });
   sendNative({ type: "request-protection-state", sessionId, enabled: true, origin, allowedPaths: allowedPaths.length });
 }
 
 async function probeActiveTab(sessionId, connectorIdValue, originValue) {
   activeSessionId = sessionId;
+  persistRuntimeState();
   const connectorId = typeof connectorIdValue === "string" ? connectorIdValue.slice(0, 120) : "";
   const expectedOrigin = typeof originValue === "string" && isAllowedOrigin(originValue) ? new URL(originValue).origin : "";
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -221,7 +256,13 @@ async function probeActiveTab(sessionId, connectorIdValue, originValue) {
 }
 
 function broadcast(message) {
-  for (const port of sidePanelPorts) port.postMessage(message);
+  for (const port of sidePanelPorts) {
+    try {
+      port.postMessage(message);
+    } catch {
+      sidePanelPorts.delete(port);
+    }
+  }
 }
 
 async function ensureHost() {
@@ -304,6 +345,25 @@ async function handoffCapture(tabId) {
     const url = safePageUrl(tab.url || "");
     const origin = url ? new URL(url).origin : null;
     const granted = origin ? await chrome.permissions.contains({ origins: [originPattern(origin)] }) : false;
+    if (tabId === captureTabId) {
+      if (origin === captureOrigin) return;
+      if (!origin || !granted) {
+        sendNative({ type: "connector-navigation", sessionId: activeSessionId, state: "blocked", reason: origin ? "新业务域名尚未授权，观众屏已进入隐私保护。" : "当前标签不在安全业务地址范围内。", ...(origin ? { origin } : {}) });
+        broadcast({ type: "origin-authorization-required", origin });
+        return;
+      }
+      const probe = await chrome.tabs.sendMessage(tabId, { type: "showit-probe" }).catch(() => null);
+      const privacyRisk = ["password", "file", "mfa", "sso"].includes(probe?.privacyRisk) ? probe.privacyRisk : null;
+      if (privacyRisk || probe?.hasPasswordField === true) {
+        sendNative({ type: "connector-navigation", sessionId: activeSessionId, state: "blocked", reason: "新标签包含登录或敏感输入，观众屏保持隐私保护。", origin });
+        return;
+      }
+      const originChanged = captureOrigin !== null;
+      captureOrigin = origin;
+      persistRuntimeState();
+      if (originChanged) sendNative({ type: "connector-navigation", sessionId: activeSessionId, state: "ready", origin, title: String(tab.title || "").slice(0, 300) });
+      return;
+    }
     const decision = captureHandoffDecision(captureTabId, tabId, tab.url || "", granted);
     if (decision === "ignore") return;
     if (decision !== "handoff") {
@@ -319,6 +379,8 @@ async function handoffCapture(tabId) {
     }
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
     captureTabId = tabId;
+    captureOrigin = origin;
+    persistRuntimeState();
     broadcast({ type: "capture-handoff", streamId, tabId, tabTitle: tab.title ?? "业务标签" });
     sendNative({ type: "connector-navigation", sessionId: activeSessionId, state: "ready", origin, title: String(tab.title || "").slice(0, 300) });
   } catch (error) {
@@ -350,6 +412,15 @@ chrome.runtime.onConnect.addListener((port) => {
     if (message?.type === "capture-state") {
       captureActive = message.active === true;
       captureTabId = captureActive && Number.isInteger(message.tabId) ? message.tabId : null;
+      captureOrigin = null;
+      if (captureTabId !== null) {
+        void chrome.tabs.get(captureTabId).then((tab) => {
+          const url = safePageUrl(tab.url || "");
+          if (url) captureOrigin = new URL(url).origin;
+          persistRuntimeState();
+        }).catch(() => undefined);
+      }
+      persistRuntimeState();
     }
     if (message?.type === "request-origin") {
       const origin = message.origin;

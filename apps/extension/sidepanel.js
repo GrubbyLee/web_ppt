@@ -13,7 +13,11 @@ const totalTime = document.querySelector("#total-time");
 const pageTime = document.querySelector("#page-time");
 const stepText = document.querySelector("#step-text");
 const stepCounter = document.querySelector("#step-counter");
-const port = chrome.runtime.connect({ name: "showit-side-panel" });
+let port = null;
+let panelReconnectTimer = null;
+let panelReconnectAttempt = 0;
+let sessionStateKnown = false;
+let lastCaptureTabId = null;
 let audienceSignalUrl = "";
 let audienceDeliveryMode = "p2p";
 let audienceSfuUrl = "";
@@ -26,15 +30,60 @@ let signalSocket = null;
 let sfuRoom = null;
 let signalReconnectTimer = null;
 let signalReconnectAttempt = 0;
-let currentScreenMode = "normal";
+let currentScreenMode = "privacy";
 let currentOfflineFallbackActive = false;
 let currentPrivacyMasks = [];
 let timerState = { timerStatus: "idle", totalElapsedMs: 0, pageElapsedMs: 0, timerStartedAt: null };
 const peers = new Map();
 
-port.postMessage({ type: "connect-native" });
+function schedulePanelReconnect() {
+  if (panelReconnectTimer) return;
+  const delay = Math.min(10_000, 500 * 2 ** Math.min(panelReconnectAttempt++, 5));
+  panelReconnectTimer = setTimeout(() => {
+    panelReconnectTimer = null;
+    if (!chrome.runtime?.id) {
+      status.textContent = "扩展已重新加载，请刷新面板页面。";
+      return;
+    }
+    try {
+      connectPanelPort();
+    } catch {
+      schedulePanelReconnect();
+    }
+  }, delay);
+}
 
-port.onMessage.addListener((message) => {
+function connectPanelPort() {
+  const nextPort = chrome.runtime.connect({ name: "showit-side-panel" });
+  nextPort.onMessage.addListener(handlePanelMessage);
+  nextPort.onDisconnect.addListener(() => {
+    if (port !== nextPort) return;
+    port = null;
+    status.textContent = "与后台连接中断，正在重连…";
+    schedulePanelReconnect();
+  });
+  port = nextPort;
+  panelReconnectAttempt = 0;
+  try {
+    nextPort.postMessage({ type: "connect-native" });
+    if (captureStream && lastCaptureTabId !== null) nextPort.postMessage({ type: "capture-state", active: true, tabId: lastCaptureTabId });
+  } catch {
+    schedulePanelReconnect();
+  }
+  return nextPort;
+}
+
+function postToPort(payload) {
+  try {
+    port?.postMessage(payload);
+  } catch {
+    schedulePanelReconnect();
+  }
+}
+
+connectPanelPort();
+
+function handlePanelMessage(message) {
   if (message.type === "native-connected") status.textContent = "桌面端已连接";
   if (message.type === "native-unavailable") status.textContent = "等待桌面端";
   if (message.type === "native-disconnected") status.textContent = "桌面端断开";
@@ -54,7 +103,8 @@ port.onMessage.addListener((message) => {
       pageElapsedMs: Number(message.payload.pageElapsedMs) || 0,
       timerStartedAt: typeof message.payload.timerStartedAt === "number" ? message.payload.timerStartedAt : null
     };
-    currentScreenMode = message.payload.screenMode || "normal";
+    currentScreenMode = ["normal", "black", "white", "frozen", "privacy", "ended"].includes(message.payload.screenMode) ? message.payload.screenMode : "privacy";
+    sessionStateKnown = true;
     currentOfflineFallbackActive = message.payload.offlineFallbackActive === true;
     currentPrivacyMasks = sanitizeAudienceMasks(message.payload.privacyMasks);
     updateCapturePrivacy();
@@ -89,7 +139,7 @@ port.onMessage.addListener((message) => {
   }
   if (message.type === "capture-stream-id" || message.type === "capture-handoff") startCapture(message.streamId, message.tabTitle, message.tabId);
   if (message.type === "capture-error") meta.textContent = message.reason;
-});
+}
 
 function formatTime(value) {
   const seconds = Math.max(0, Math.floor(value / 1000));
@@ -105,14 +155,14 @@ function renderTimer() {
 setInterval(renderTimer, 500);
 
 function command(type) {
-  port.postMessage({ type: "native-command", payload: { type, sessionId: activeSessionId, commandId: `${Date.now().toString(36)}-${crypto.randomUUID()}` } });
+  postToPort({ type: "native-command", payload: { type, sessionId: activeSessionId, commandId: `${Date.now().toString(36)}-${crypto.randomUUID()}` } });
 }
 
 originForm.addEventListener("submit", (event) => {
   event.preventDefault();
   try {
     const origin = new URL(originInput.value).origin;
-    port.postMessage({ type: "request-origin", origin });
+    postToPort({ type: "request-origin", origin });
   } catch {
     originStatus.textContent = "请输入完整 HTTPS 或本机开发 URL";
   }
@@ -137,7 +187,7 @@ captureButton.addEventListener("click", async () => {
     meta.textContent = "需要局域网投送权限后才能开始。";
     return;
   }
-  port.postMessage({ type: "request-tab-capture" });
+  postToPort({ type: "request-tab-capture" });
 });
 
 stopCaptureButton.addEventListener("click", stopCapture);
@@ -155,10 +205,11 @@ async function startCapture(streamId, tabTitle, tabId) {
     });
     stopCapture();
     captureStream = stream;
+    lastCaptureTabId = Number.isInteger(tabId) ? tabId : null;
     audienceCompositor = createAudienceCompositor(stream, () => ({ screenMode: currentScreenMode, offlineFallbackActive: currentOfflineFallbackActive, privacyMasks: currentPrivacyMasks }));
     audienceStream = audienceCompositor.stream;
     updateCapturePrivacy();
-    port.postMessage({ type: "capture-state", active: true, tabId });
+    postToPort({ type: "capture-state", active: true, tabId });
     connectPublisher();
     captureButton.disabled = true;
     stopCaptureButton.disabled = false;
@@ -285,6 +336,10 @@ async function createPeer(audienceId) {
   };
   const offer = await peer.createOffer();
   await peer.setLocalDescription(offer);
+  if (!signalSocket || signalSocket.readyState !== WebSocket.OPEN) {
+    closePeer(audienceId);
+    return;
+  }
   signalSocket.send(JSON.stringify({ type: "offer", to: audienceId, description: peer.localDescription }));
 }
 
@@ -309,7 +364,7 @@ async function applyPeerQuality(audienceId, mode) {
 }
 
 function updateCapturePrivacy() {
-  const visible = currentScreenMode !== "privacy" && !currentOfflineFallbackActive;
+  const visible = sessionStateKnown && currentScreenMode !== "privacy" && !currentOfflineFallbackActive;
   captureStream?.getVideoTracks().forEach((track) => {
     track.enabled = visible;
   });
@@ -321,6 +376,7 @@ function closePeer(audienceId) {
 }
 
 function stopCapture() {
+  const ownedCapture = captureStream !== null;
   if (signalReconnectTimer) {
     clearTimeout(signalReconnectTimer);
     signalReconnectTimer = null;
@@ -342,7 +398,7 @@ function stopCapture() {
     void sfuRoom.disconnect();
     sfuRoom = null;
   }
-  port.postMessage({ type: "capture-state", active: false });
+  if (ownedCapture) postToPort({ type: "capture-state", active: false });
   captureButton.disabled = audienceDeliveryMode === "sfu" ? !audienceSfuUrl || !audienceSfuToken : !audienceSignalUrl;
   stopCaptureButton.disabled = true;
 }

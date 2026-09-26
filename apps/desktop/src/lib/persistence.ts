@@ -13,6 +13,7 @@ import {
   type Rehearsal
 } from "@showit/contracts";
 import { createRemoteAudienceSnapshot } from "./remote-audience-snapshot";
+import { clearProjectDraft } from "./project-draft";
 import { migrateLegacyBundledSample } from "./sample-project";
 import { trustProject } from "./project-trust";
 
@@ -310,6 +311,24 @@ export async function deleteWorkspace(projectId: string): Promise<void> {
   }
   writeBrowserLibrary(readBrowserLibrary().filter((item) => item.project.id !== projectId));
   if (localStorage.getItem(ACTIVE_PROJECT_KEY) === projectId) localStorage.removeItem(ACTIVE_PROJECT_KEY);
+  // A "此操作无法恢复" delete must not leave drafts, versions or rehearsal
+  // history behind — a re-imported project with the same id would otherwise
+  // inherit (or be silently overwritten by) the deleted project's data.
+  clearProjectDraft(projectId);
+  localStorage.setItem(
+    VERSION_STORAGE_KEY,
+    JSON.stringify(parseStoredArray(VERSION_STORAGE_KEY, (value) => {
+      const parsed = ProjectVersionSchema.safeParse(value);
+      return parsed.success ? parsed.data : null;
+    }).filter((version) => version.projectId !== projectId))
+  );
+  localStorage.setItem(
+    REHEARSAL_STORAGE_KEY,
+    JSON.stringify(parseStoredArray(REHEARSAL_STORAGE_KEY, (value) => {
+      const parsed = RehearsalSchema.safeParse(value);
+      return parsed.success ? parsed.data : null;
+    }).filter((rehearsal) => rehearsal.projectId !== projectId))
+  );
 }
 
 export function setActiveProject(projectId: string): void {

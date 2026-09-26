@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Input, Modal } from "antd";
-import { createAudienceChannel, publishSnapshot } from "../../lib/audience-sync";
+import { createAudienceChannel, laserOnlyChange, publishLaser, publishSnapshot } from "../../lib/audience-sync";
 import { clearReadonlyProxy, decideAudienceViewer, disconnectAllAudienceViewers, disconnectAudienceViewer, focusMainWindow, getAudienceSessionStatus, listAudienceNetworkInterfaces, listenAudienceWindowClosed, listenExtensionMessages, loadRuntimeSession, openAudienceWindow, loadWorkspace, publishAudienceSession, saveRuntimeSession, sendExtensionMessage, startAudienceSession, stopAudienceSession, type AudienceNetworkInterface, type AudienceSessionStatus, type AudienceShare } from "../../lib/persistence";
 import { listRehearsals, saveRehearsal } from "../../lib/persistence";
 import { autoAdvanceElapsedMs, usePresentationStore } from "../../stores/presentation-store";
@@ -11,7 +11,7 @@ import { BusinessStage } from "./BusinessStage";
 import { NotesPanel } from "./NotesPanel";
 import { PresentationFooter } from "./PresentationFooter";
 import { PresenterTopBar } from "./PresenterTopBar";
-import { ElementLocatorSchema, PresentationSessionSchema, ProjectSchema, type PresentationStep, type ScreenMode } from "@showit/contracts";
+import { ElementLocatorSchema, PresentationSessionSchema, ProjectSchema, type PresentationSession, type PresentationStep, type Project, type ScreenMode } from "@showit/contracts";
 import type { Rehearsal } from "@showit/contracts";
 import { recordDiagnostic } from "../../lib/diagnostics";
 import { clearRuntimeSecrets, missingRuntimeSecrets, setRuntimeSecrets } from "../../lib/runtime-secrets";
@@ -145,6 +145,7 @@ export function PresenterShell() {
   const handledCommandIds = useRef(new Set<string>());
   const pendingStepOperations = useRef(new Map<string, { sessionId: string; stepId: string }>());
   const pendingMaskPicker = useRef<{ requestId: string; pageId: string; mode: "solid" | "blur"; timeoutId: number } | null>(null);
+  const lastPublished = useRef<{ project: Project; session: PresentationSession } | null>(null);
   const connectorProbe = useRef<ReturnType<typeof startExtensionProbe> | null>(null);
   const closing = useRef(false);
 
@@ -270,16 +271,16 @@ export function PresenterShell() {
     const isTrusted = async (workspace: NonNullable<Awaited<ReturnType<typeof loadWorkspace>>>) => {
       return await projectTrustState(workspace.project) === "trusted";
     };
-    const load = async (): Promise<{ workspace: Awaited<ReturnType<typeof loadWorkspace>>; trustSource: Awaited<ReturnType<typeof loadWorkspace>>; recovered: boolean }> => {
+    const load = async (): Promise<{ workspace: Awaited<ReturnType<typeof loadWorkspace>>; trustSource: Awaited<ReturnType<typeof loadWorkspace>>; continueSession: boolean }> => {
       const launched = projectId ? loadPresentationLaunch(projectId) : null;
-      if (launched) return { workspace: launched, trustSource: await loadWorkspace(projectId), recovered: false };
+      if (launched) return { workspace: launched, trustSource: await loadWorkspace(projectId), continueSession: true };
       const recovered = projectId ? await loadRuntimeSession(projectId).catch(() => null) : null;
-      if (recovered) return { workspace: recovered, trustSource: await loadWorkspace(projectId), recovered: true };
+      if (recovered) return { workspace: recovered, trustSource: await loadWorkspace(projectId), continueSession: true };
       const workspace = await loadWorkspace(projectId);
-      return { workspace, trustSource: workspace, recovered: false };
+      return { workspace, trustSource: workspace, continueSession: false };
     };
     load()
-      .then(async ({ workspace: stored, trustSource, recovered }) => {
+      .then(async ({ workspace: stored, trustSource, continueSession }) => {
         if (!mounted) return;
         if (stored && (!projectId || stored.project.id === projectId)) {
           if (!await isTrusted(trustSource ?? stored)) {
@@ -287,7 +288,9 @@ export function PresenterShell() {
             navigate("/projects", { replace: true });
             return;
           }
-          const launch = recovered ? stored : beginPresentationLaunch(stored.project);
+          // A remount must continue the live session (page, timers, steps),
+          // not restart from the cover page mid-presentation.
+          const launch = continueSession ? stored : beginPresentationLaunch(stored.project);
           savePresentationLaunch(launch);
           setWorkspace(launch.project, launch.session);
           return;
@@ -357,7 +360,20 @@ export function PresenterShell() {
 
   useEffect(() => {
     if (!hydrated) return;
-    publishSnapshot(project, session);
+    // Laser moves arrive at up to ~30 Hz; publish the small laser delta
+    // instead of cloning the full project for every pointer sample.
+    const previous = lastPublished.current;
+    lastPublished.current = { project, session };
+    if (previous && previous.project === project) {
+      const laser = laserOnlyChange(previous.session, session);
+      if (laser !== undefined) {
+        publishLaser(session, laser);
+      } else {
+        publishSnapshot(project, session);
+      }
+    } else {
+      publishSnapshot(project, session);
+    }
     if (audienceShare?.sessionId === session.id) publishAudienceSession(project, session).catch((error) => {
       recordDiagnostic("同步局域网观众", error);
       void sendExtensionMessage({ type: "audience-share", sessionId: session.id, signalUrl: "", deliveryMode: "p2p", sfuUrl: "", sfuToken: "" });
@@ -402,6 +418,7 @@ export function PresenterShell() {
   useEffect(() => {
     if (!hydrated) return;
     let unlisten: (() => void) | null = null;
+    let disposed = false;
     listenExtensionMessages((message) => {
       if (!message || typeof message !== "object") return;
       const command = message as { type?: unknown; sessionId?: unknown; commandId?: unknown; operationId?: unknown; stepId?: unknown; ok?: unknown; reason?: unknown };
@@ -534,8 +551,16 @@ export function PresenterShell() {
           ...(typeof protection.reason === "string" ? { reason: protection.reason.slice(0, 200) } : { title: protection.enabled === true ? "请求保护已启用" : "交互模式" })
         });
       }
-    }).then((cleanup) => { unlisten = cleanup; }).catch((error) => { recordDiagnostic("连接浏览器扩展", error); });
-    return () => unlisten?.();
+    }).then((cleanup) => {
+      // The effect may unmount before the listener promise settles — detach
+      // immediately in that case instead of leaking the subscription.
+      if (disposed) { cleanup?.(); return; }
+      unlisten = cleanup;
+    }).catch((error) => { recordDiagnostic("连接浏览器扩展", error); });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [hydrated, markStepFailed, runNextStep]);
 
   useEffect(() => () => {
@@ -609,8 +634,17 @@ export function PresenterShell() {
   useEffect(() => {
     if (!hydrated) return;
     let unlisten: (() => void) | null = null;
-    listenAudienceWindowClosed(session.id, audienceDisconnected).then((cleanup) => { unlisten = cleanup; }).catch(() => undefined);
-    return () => unlisten?.();
+    let disposed = false;
+    listenAudienceWindowClosed(session.id, audienceDisconnected)
+      .then((cleanup) => {
+        if (disposed) { cleanup?.(); return; }
+        unlisten = cleanup;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [audienceDisconnected, hydrated, session.id]);
 
   const autoAdvanceBlocked = !hydrated
@@ -640,9 +674,19 @@ export function PresenterShell() {
     }
   }, [autoAdvanceBlocked, now, page, project.autoAdvanceEnabled, project.autoAdvanceSeconds, project.pages.length, session, setActivePage]);
 
+  // While a modal owns the screen, shortcuts must stay silent — otherwise pages
+  // flip invisibly behind the dialog and Escape cascades into unrelated state.
+  const modalOpen = settingsOpen
+    || secretPromptOpen
+    || offlineOriginRequest !== null
+    || maskPickerActive
+    || pendingHighRiskStep !== null
+    || forceCompletion !== null
+    || stepExecution !== null;
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (hasEditableTarget(event) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (modalOpen || hasEditableTarget(event) || event.ctrlKey || event.metaKey || event.altKey) return;
       if (["ArrowRight", "ArrowDown", "PageDown"].includes(event.key)) {
         event.preventDefault();
         setActivePage(session.currentPageIndex + 1);
@@ -692,7 +736,7 @@ export function PresenterShell() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [clearAnnotations, pauseTimer, project.autoAdvanceEnabled, project.pages.length, prompterOpen, session.annotationTool, session.currentPageIndex, session.screenMode, session.timerStatus, setActivePage, setAnnotationTool, setAutoAdvance, setScreenMode, startTimer, toggleRehearsal]);
+  }, [clearAnnotations, modalOpen, pauseTimer, project.autoAdvanceEnabled, project.pages.length, prompterOpen, session.annotationTool, session.currentPageIndex, session.screenMode, session.timerStatus, setActivePage, setAnnotationTool, setAutoAdvance, setScreenMode, startTimer, toggleRehearsal]);
 
   useEffect(() => {
     if (!session.laser) return;

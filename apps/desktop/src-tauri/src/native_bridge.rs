@@ -9,6 +9,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -87,9 +88,20 @@ fn handle_client(
     let Ok(writer) = stream.try_clone() else {
         return;
     };
+    // Bound the handshake phase: an unauthenticated peer gets a read timeout,
+    // and a write timeout so a stalled client cannot hold the send lock.
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
     let mut reader = BufReader::new(stream);
     let mut handshake = String::new();
-    if reader.read_line(&mut handshake).is_err() || handshake.len() > 512 {
+    // Never buffer more than 512 bytes of an unauthenticated line.
+    if reader
+        .by_ref()
+        .take(513)
+        .read_line(&mut handshake)
+        .is_err()
+        || handshake.len() > 512
+    {
         return;
     }
     let authenticated = serde_json::from_str::<Value>(&handshake)
@@ -104,12 +116,22 @@ fn handle_client(
     if !authenticated {
         return;
     }
+    let _ = reader.get_ref().set_read_timeout(None);
     if let Ok(mut connected) = clients.lock() {
         connected.push(writer);
     }
 
-    for line in reader.lines() {
-        let Ok(line) = line else { break };
+    loop {
+        let mut line = String::new();
+        match reader
+            .by_ref()
+            .take((MAX_MESSAGE_SIZE + 1) as u64)
+            .read_line(&mut line)
+        {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
         if line.len() > MAX_MESSAGE_SIZE {
             break;
         }

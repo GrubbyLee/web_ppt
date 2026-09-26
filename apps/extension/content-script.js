@@ -30,7 +30,11 @@ if (!globalThis.__showitConnectorLoaded) {
   let privacyRiskTimer = null;
   function reportPrivacyRisk() {
     const risk = detectPrivacyRisk();
-    if (!risk || risk === lastPrivacyRisk) return;
+    if (!risk) {
+      lastPrivacyRisk = null;
+      return;
+    }
+    if (risk === lastPrivacyRisk) return;
     lastPrivacyRisk = risk;
     chrome.runtime.sendMessage({ type: "showit-privacy-risk", origin: location.origin, privacyRisk: risk });
   }

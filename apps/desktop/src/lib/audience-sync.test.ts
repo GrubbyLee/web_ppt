@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCacheAudienceSnapshot, createAudienceEventGuard } from "./audience-sync";
+import { createAudienceEventGuard, laserOnlyChange } from "./audience-sync";
 import { sampleProject, sampleSession } from "./sample-project";
 
 describe("audience event guard", () => {
@@ -13,9 +13,19 @@ describe("audience event guard", () => {
   });
 });
 
-describe("audience snapshot cache", () => {
-  it("does not put oversized presentation assets into localStorage", () => {
-    expect(canCacheAudienceSnapshot({ content: "x".repeat(1_500_001) })).toBe(false);
-    expect(canCacheAudienceSnapshot({ content: "x".repeat(1_000) })).toBe(true);
+describe("laser delta detection", () => {
+  it("publishes a laser delta when only the pointer moved", () => {
+    const previous = { ...sampleSession, sequence: 7, laser: { x: 0.1, y: 0.2, expiresAt: 1 } };
+    const moved = { ...previous, sequence: 8, laser: { x: 0.3, y: 0.4, expiresAt: 2 } };
+    expect(laserOnlyChange(previous, moved)).toEqual({ x: 0.3, y: 0.4, expiresAt: 2 });
+    expect(laserOnlyChange(moved, { ...moved, sequence: 9, laser: null })).toBeNull();
+  });
+
+  it("falls back to a full snapshot for any other session change", () => {
+    const previous = { ...sampleSession, sequence: 7, laser: { x: 0.1, y: 0.2, expiresAt: 1 } };
+    expect(laserOnlyChange(previous, { ...previous, sequence: 8, laser: { x: 0.3, y: 0.4, expiresAt: 2 }, currentPageIndex: 3 })).toBeUndefined();
+    expect(laserOnlyChange(previous, { ...previous, sequence: 8, laser: { x: 0.3, y: 0.4, expiresAt: 2 }, circles: [{ id: "circle-1", x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 }] })).toBeUndefined();
+    const unchanged = { ...previous, sequence: 8 };
+    expect(laserOnlyChange(previous, unchanged)).toBeUndefined();
   });
 });

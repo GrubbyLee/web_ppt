@@ -18,7 +18,7 @@ const page = await context.newPage();
 async function selectPage(index) {
   await page.getByTitle("打开页面选择网格").click();
   await page.locator(".page-grid button").nth(index).click();
-  await page.locator(".business-frame-wrap iframe").waitFor({ state: "visible" });
+  await page.locator(`.business-frame-wrap iframe[src$="/console/?view=${expectedViews[index]}"]`).waitFor({ state: "visible" });
 }
 
 try {

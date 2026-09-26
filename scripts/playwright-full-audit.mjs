@@ -80,7 +80,7 @@ try {
   const sampleRow = page.locator(".project-row").filter({ hasText: "LCAPIM 五角色治理闭环" }).first();
   await sampleRow.getByTitle("启动演示运行时").click();
   const trustButton = page.getByRole("button", { name: "重新信任并运行", exact: true });
-  if (await trustButton.isVisible().catch(() => false)) await trustButton.click();
+  if (await trustButton.waitFor({ state: "visible", timeout: 8_000 }).then(() => true).catch(() => false)) await trustButton.click();
   await page.locator(".presenter-shell").waitFor({ state: "visible" });
   const accountsResponse = await context.request.get(`${appUrl}/api/lc/v1/demo/accounts`);
   assert.equal(accountsResponse.status(), 200);
@@ -103,13 +103,16 @@ try {
     for (let index = 0; index < 18; index += 1) {
       await page.getByTitle("打开页面选择网格").click();
       await page.locator(".page-grid button").nth(index).click();
+      await page.locator(`.business-frame-wrap iframe[src$="/console/?view=${expectedViews[index]}"]`).waitFor({ state: "visible" });
       const frameElement = page.locator(".business-frame-wrap iframe");
-      await frameElement.waitFor({ state: "visible" });
       assert.match(await frameElement.getAttribute("src") ?? "", new RegExp(`/console/\\?view=${expectedViews[index]}$`));
       const frame = frameElement.contentFrame();
       await frame.locator("[data-page-title]").waitFor({ state: "visible", timeout: 10_000 });
       assert.equal(await page.locator(".business-frame-error").count(), 0);
-      await page.waitForFunction(() => !document.querySelector(".stage-status-strip")?.textContent?.includes("正在检查"));
+      await page.waitForFunction(() => {
+        const strip = document.querySelector(".stage-status-strip");
+        return Boolean(strip) && !strip.textContent?.includes("正在检查");
+      });
       const frameWidth = await frame.locator("html").evaluate((element) => ({ client: element.clientWidth, scroll: element.scrollWidth }));
       assert.ok(frameWidth.scroll <= frameWidth.client + 1, `business page ${index + 1} horizontally overflows`);
     }
@@ -131,7 +134,7 @@ try {
     await page.keyboard.press("f");
     await audience.locator(".audience-freeze-indicator").waitFor({ state: "visible" });
     await page.keyboard.press("PageDown");
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(1_200);
     assert.equal(await audience.locator(".audience-status strong").innerText(), frozenPage);
     assert.equal(await audience.locator(".audience-business-frame").getAttribute("src"), frozenSrc);
     await page.keyboard.press("f");

@@ -476,18 +476,26 @@ async function parseLegacyProjectPackage(text: string, password?: string): Promi
   if (!password) throw new PackagePasswordError("password-required");
   if (typeof value.iterations !== "number" || !Number.isInteger(value.iterations) || value.iterations < 100_000 || value.iterations > 1_000_000) throw new Error("项目包密钥参数无效。");
 
+  // Integrity and parameter checks are password-independent — a mismatch here
+  // means a corrupt or tampered file, not a wrong password.
+  const encrypted = base64ToBytes(value.payload);
+  if (await sha256(encrypted) !== value.checksum) throw new Error("项目包完整性校验失败，文件可能已被修改。");
+  const salt = base64ToBytes(value.salt);
+  const iv = base64ToBytes(value.iv);
+  if (salt.byteLength !== 16 || iv.byteLength !== 12) throw new Error("项目包加密参数无效。");
+
+  let decrypted: ArrayBuffer;
   try {
-    const encrypted = base64ToBytes(value.payload);
-    if (await sha256(encrypted) !== value.checksum) throw new Error("checksum");
-    const salt = base64ToBytes(value.salt);
-    const iv = base64ToBytes(value.iv);
-    if (salt.byteLength !== 16 || iv.byteLength !== 12) throw new Error("parameters");
     const key = await deriveLegacyPackageKey(password, salt, value.iterations);
-    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, encrypted as BufferSource);
+    decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, encrypted as BufferSource);
+  } catch {
+    throw new PackagePasswordError("password-invalid");
+  }
+  try {
     return parseProjectCandidate(JSON.parse(decoder.decode(decrypted)));
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error("解密后的项目数据格式无效。");
-    throw new PackagePasswordError("password-invalid");
+    throw error;
   }
 }
 
@@ -589,25 +597,31 @@ async function parseZipProjectPackage(bytes: Uint8Array, password?: string): Pro
   if (manifest.encryption === "none") return parsePlainArchive(files, manifest);
   if (!password) throw new PackagePasswordError("password-required");
   const { memoryKiB, iterations, parallelism } = manifest.kdf ?? {};
-  if (!Number.isInteger(memoryKiB) || memoryKiB < 8_192 || memoryKiB > 262_144 || !Number.isInteger(iterations) || iterations < 1 || iterations > 10 || !Number.isInteger(parallelism) || parallelism < 1 || parallelism > 4) {
+  // Import caps match the export-side argon2Parameters: packages are authored by
+  // Showit itself, so costlier parameters signal a hand-crafted package meant to
+  // freeze the main thread during key derivation.
+  if (!Number.isInteger(memoryKiB) || memoryKiB < 8_192 || memoryKiB > argon2Parameters.memoryKiB || !Number.isInteger(iterations) || iterations < 1 || iterations > argon2Parameters.iterations || !Number.isInteger(parallelism) || parallelism < 1 || parallelism > 4) {
     throw new Error("项目包 Argon2id 参数无效。");
   }
   const encrypted = files[manifest.payload?.path];
   if (!encrypted || manifest.payload.path !== "payload.bin" || await sha256(encrypted) !== manifest.payload.checksum) throw new Error("项目包完整性校验失败。");
+  const salt = base64ToBytes(manifest.salt);
+  const iv = base64ToBytes(manifest.iv);
+  if (salt.byteLength !== 16 || iv.byteLength !== 12) throw new Error("项目包加密参数无效。");
+
+  let decrypted: Uint8Array;
   try {
-    const salt = base64ToBytes(manifest.salt);
-    const iv = base64ToBytes(manifest.iv);
-    if (salt.byteLength !== 16 || iv.byteLength !== 12) throw new Error("parameters");
     const key = await derivePackageKey(password, salt, { memoryKiB, iterations, parallelism });
-    const decrypted = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, encrypted as BufferSource));
-    const innerFiles = unzipPackage(decrypted);
-    const innerManifest = parseManifest(innerFiles);
-    if (innerManifest.encryption !== "none") throw new Error("nested-encryption");
-    return await parsePlainArchive(innerFiles, innerManifest);
-  } catch (error) {
-    if (error instanceof PackagePasswordError) throw error;
+    decrypted = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, encrypted as BufferSource));
+  } catch {
+    // The outer payload checksum was verified above, so decryption can only
+    // fail on a wrong password.
     throw new PackagePasswordError("password-invalid");
   }
+  const innerFiles = unzipPackage(decrypted);
+  const innerManifest = parseManifest(innerFiles);
+  if (innerManifest.encryption !== "none") throw new Error("项目包包含嵌套加密数据，格式无效。");
+  return await parsePlainArchive(innerFiles, innerManifest);
 }
 
 export async function parseProjectPackage(input: string | ArrayBuffer | Uint8Array, password?: string): Promise<Project> {

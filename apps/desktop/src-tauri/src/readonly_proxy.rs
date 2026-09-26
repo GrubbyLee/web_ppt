@@ -8,24 +8,40 @@ use axum::{
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, TcpListener},
     sync::Arc,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{watch, Mutex, RwLock};
 
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
 
+// Each project gets its own loopback listener, so every business origin keeps
+// an isolated browser cookie jar: cookies issued for one demo target can never
+// be replayed to another target that happens to share the proxy origin.
 #[derive(Clone)]
 pub struct ReadonlyProxyService {
-    port: u16,
     client: reqwest::Client,
+    instances: Arc<Mutex<HashMap<String, ProxyInstance>>>,
+}
+
+struct ProxyInstance {
+    port: u16,
+    target_origin: String,
+    config: Arc<RwLock<Option<ProxyConfig>>>,
+    shutdown: watch::Sender<bool>,
+}
+
+#[derive(Clone)]
+struct ProxyState {
+    client: reqwest::Client,
+    port: u16,
     config: Arc<RwLock<Option<ProxyConfig>>>,
 }
 
 #[derive(Clone)]
 struct ProxyConfig {
-    project_id: String,
     target_origin: String,
     allowed_write_paths: Vec<String>,
     request_headers: HeaderMap,
@@ -45,37 +61,16 @@ pub struct ReadonlyProxyTarget {
 
 impl ReadonlyProxyService {
     pub fn start() -> Result<Self, String> {
-        let listener =
-            TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|error| error.to_string())?;
-        listener
-            .set_nonblocking(true)
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent("Showit/0.1 readonly-proxy")
+            .build()
             .map_err(|error| error.to_string())?;
-        let port = listener
-            .local_addr()
-            .map_err(|error| error.to_string())?
-            .port();
-        let service = Self {
-            port,
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(std::time::Duration::from_secs(30))
-                .user_agent("Showit/0.1 readonly-proxy")
-                .build()
-                .map_err(|error| error.to_string())?,
-            config: Arc::new(RwLock::new(None)),
-        };
-        let router = Router::new()
-            .fallback(proxy_request)
-            .with_state(service.clone());
-        tauri::async_runtime::spawn(async move {
-            let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
-                return;
-            };
-            if let Err(error) = axum::serve(listener, router).await {
-                eprintln!("只读代理异常退出: {error}");
-            }
-        });
-        Ok(service)
+        Ok(Self {
+            client,
+            instances: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
     pub async fn configure(
@@ -123,27 +118,36 @@ impl ReadonlyProxyService {
             };
             safe_headers.insert(name, value);
         }
-        *self.config.write().await = Some(ProxyConfig {
-            project_id,
-            target_origin,
+        let config = ProxyConfig {
+            target_origin: target_origin.clone(),
             allowed_write_paths,
             request_headers: safe_headers,
-        });
-        Ok(ReadonlyProxyTarget {
-            url: self.proxy_url(&page),
-        })
+        };
+        let mut instances = self.instances.lock().await;
+        if let Some(instance) = instances.get(&project_id) {
+            if instance.target_origin == target_origin {
+                *instance.config.write().await = Some(config);
+                return Ok(ReadonlyProxyTarget {
+                    url: instance.proxy_url(&page),
+                });
+            }
+        }
+        let instance = spawn_proxy_instance(self.client.clone(), config)?;
+        let url = instance.proxy_url(&page);
+        if let Some(previous) = instances.insert(project_id, instance) {
+            let _ = previous.shutdown.send(true);
+        }
+        Ok(ReadonlyProxyTarget { url })
     }
 
     pub async fn clear(&self, project_id: &str) {
-        let mut config = self.config.write().await;
-        if config
-            .as_ref()
-            .is_some_and(|current| current.project_id == project_id)
-        {
-            *config = None;
+        if let Some(instance) = self.instances.lock().await.remove(project_id) {
+            let _ = instance.shutdown.send(true);
         }
     }
+}
 
+impl ProxyInstance {
     fn proxy_url(&self, target: &Url) -> String {
         let mut value = format!("http://127.0.0.1:{}{}", self.port, target.path());
         if let Some(query) = target.query() {
@@ -156,6 +160,50 @@ impl ReadonlyProxyService {
         }
         value
     }
+}
+
+fn spawn_proxy_instance(
+    client: reqwest::Client,
+    config: ProxyConfig,
+) -> Result<ProxyInstance, String> {
+    let listener =
+        TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|error| error.to_string())?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| error.to_string())?
+        .port();
+    let target_origin = config.target_origin.clone();
+    let config = Arc::new(RwLock::new(Some(config)));
+    let (shutdown, mut shutdown_signal) = watch::channel(false);
+    let state = ProxyState {
+        client,
+        port,
+        config: config.clone(),
+    };
+    tauri::async_runtime::spawn(async move {
+        let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
+            return;
+        };
+        let server = axum::serve(
+            listener,
+            Router::new().fallback(proxy_request).with_state(state),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_signal.wait_for(|stop| *stop).await;
+        });
+        if let Err(error) = server.await {
+            eprintln!("只读代理异常退出: {error}");
+        }
+    });
+    Ok(ProxyInstance {
+        port,
+        target_origin,
+        config,
+        shutdown,
+    })
 }
 
 fn allowed_url(value: &str) -> Option<Url> {
@@ -349,8 +397,8 @@ fn showit_client_origin(value: &HeaderValue) -> Option<HeaderValue> {
     .then(|| value.clone())
 }
 
-async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Request) -> Response {
-    let Some(config) = service.config.read().await.clone() else {
+async fn proxy_request(State(state): State<ProxyState>, request: Request) -> Response {
+    let Some(config) = state.config.read().await.clone() else {
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "SHOWIT_PROXY_NOT_CONFIGURED",
@@ -399,7 +447,7 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
         .get(header::REFERER)
         .and_then(|value| value.to_str().ok())
     {
-        let proxy_origin = format!("http://127.0.0.1:{}", service.port);
+        let proxy_origin = format!("http://127.0.0.1:{}", state.port);
         if let Ok(value) =
             HeaderValue::from_str(&referer.replace(&proxy_origin, &config.target_origin))
         {
@@ -413,12 +461,12 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
         header::ACCEPT_ENCODING,
         HeaderValue::from_static("identity"),
     );
-    let upstream = service
+    let upstream = state
         .client
         .request(parts.method.clone(), &target)
         .headers(request_headers)
         .body(body);
-    let upstream = match upstream.send().await {
+    let mut upstream = match upstream.send().await {
         Ok(response) => response,
         Err(_) => {
             return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_UPSTREAM_UNAVAILABLE")
@@ -432,11 +480,36 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
     }
     let status = upstream.status();
     let upstream_headers = upstream.headers().clone();
-    let mut bytes = match upstream.bytes().await {
-        Ok(bytes) if bytes.len() as u64 <= MAX_RESPONSE_BYTES => bytes.to_vec(),
-        _ => return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_INVALID"),
-    };
-    let proxy_origin = format!("http://127.0.0.1:{}", service.port);
+    // A redirect that leaves the business origin would carry the iframe out of
+    // the proxy, silently dropping write protection. Same-origin (including
+    // relative and protocol-relative blocked below) targets stay allowed.
+    if status.is_redirection() {
+        if let Some(location) = upstream_headers
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+        {
+            if location.starts_with("//")
+                || Url::parse(location)
+                    .ok()
+                    .is_some_and(|url| url.origin().ascii_serialization() != config.target_origin)
+            {
+                return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_REDIRECT_BLOCKED");
+            }
+        }
+    }
+    let mut bytes = Vec::new();
+    loop {
+        let chunk = match upstream.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_) => return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_INVALID"),
+        };
+        if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES as usize {
+            return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_TOO_LARGE");
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let proxy_origin = format!("http://127.0.0.1:{}", state.port);
     let textual = upstream_headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())

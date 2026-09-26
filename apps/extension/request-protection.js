@@ -19,7 +19,7 @@ export function sanitizeProtectionPaths(paths) {
 export function buildProtectionRules(origin, allowedPaths) {
   const blockRuleId = 910_000;
   const methods = ["post", "put", "patch", "delete"];
-  const resourceTypes = ["main_frame", "sub_frame", "xmlhttprequest", "other"];
+  const resourceTypes = ["main_frame", "sub_frame", "xmlhttprequest", "ping", "other"];
   const rules = [{
     id: blockRuleId,
     priority: 1,
