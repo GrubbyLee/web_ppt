@@ -81,6 +81,6 @@ npm run native-host:register -- --extension-id <32 位扩展 ID> --host <showit-
 
 - [用户手册](docs/用户手册.md)
 - [发布与回滚](docs/发布与回滚.md)
-- [v0.1.0 发布候选验收记录](docs/v0.1.0-发布候选验收记录.md)
+- [v0.1.0 发布验收记录](docs/v0.1.0-发布候选验收记录.md)
 
 源码主仓库为 `https://gitee.com/287198991/showit.git`。仓库中的 GitHub Actions 工作流用于 GitHub 镜像或兼容 Runner；仅推送到 Gitee 不会自动执行该工作流，发布前仍须按发布文档执行门禁并配置签名与更新端点。
