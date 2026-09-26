@@ -268,7 +268,8 @@ fn redact_native_diagnostic(value: &str) -> String {
             .expect("valid sensitive header expression")
     });
     let credential = CREDENTIAL_TOKEN.get_or_init(|| {
-        Regex::new(r"(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*").expect("valid credential expression")
+        Regex::new(r"(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*")
+            .expect("valid credential expression")
     });
     let url =
         URL.get_or_init(|| Regex::new(r#"https?://[^\s"')]+"#).expect("valid URL expression"));
@@ -277,10 +278,10 @@ fn redact_native_diagnostic(value: &str) -> String {
     let redacted = query.replace_all(&redacted, "$1[REDACTED]");
     let redacted = assignment.replace_all(&redacted, "$1$2[REDACTED]");
     url.replace_all(&redacted, "[REDACTED_URL]")
-    .chars()
-    .filter(|character| !character.is_control())
-    .take(1_000)
-    .collect()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(1_000)
+        .collect()
 }
 
 fn sanitize_native_diagnostic(
@@ -382,9 +383,33 @@ fn open_business_browser(
     url: String,
     project_id: String,
     dedicated: bool,
+    in_app: bool,
 ) -> Result<String, String> {
     if !is_allowed_business_url(&url) {
         return Err("业务 URL 不在允许范围内".to_string());
+    }
+    if in_app {
+        if !is_safe_identifier(&project_id) {
+            return Err("业务窗口项目 ID 无效".to_string());
+        }
+        let label = format!("business-{project_id}");
+        let business_url = url
+            .parse::<tauri::Url>()
+            .map_err(|_| "业务 URL 无效".to_string())?;
+        if let Some(window) = app.get_webview_window(&label) {
+            window
+                .navigate(business_url)
+                .map_err(|error| format!("无法刷新业务登录窗口: {error}"))?;
+            window.show().map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())?;
+            return Ok("Showit 业务登录窗口".to_string());
+        }
+        WebviewWindowBuilder::new(&app, label, WebviewUrl::External(business_url))
+            .title("Showit 业务登录")
+            .inner_size(1280.0, 800.0)
+            .build()
+            .map_err(|error| format!("无法打开业务登录窗口: {error}"))?;
+        return Ok("Showit 业务登录窗口".to_string());
     }
     if !dedicated {
         #[cfg(target_os = "linux")]

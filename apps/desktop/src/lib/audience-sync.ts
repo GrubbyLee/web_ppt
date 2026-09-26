@@ -99,7 +99,7 @@ export function createAudienceEventGuard(sessionId: string): (event: AudienceEve
   };
 }
 
-export function announceAudienceReady(channel: BroadcastChannel, session: PresentationSession): void {
+export function announceAudienceReady(channel: BroadcastChannel, session: Pick<PresentationSession, "id" | "sequence">): void {
   channel.postMessage({
     type: "ready",
     sessionId: session.id,

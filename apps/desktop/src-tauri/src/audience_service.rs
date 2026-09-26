@@ -1276,7 +1276,11 @@ mod tests {
         let service = AudienceService::start(None).unwrap();
         tauri::async_runtime::block_on(async {
             let first = service
-                .create_session("session-token-reset", json!({ "project": {}, "session": {} }), None)
+                .create_session(
+                    "session-token-reset",
+                    json!({ "project": {}, "session": {} }),
+                    None,
+                )
                 .await
                 .unwrap();
             let first_page = audience_page(
@@ -1295,7 +1299,11 @@ mod tests {
             assert_eq!(stopped_page.status(), StatusCode::NOT_FOUND);
 
             let second = service
-                .create_session("session-token-reset", json!({ "project": {}, "session": {} }), None)
+                .create_session(
+                    "session-token-reset",
+                    json!({ "project": {}, "session": {} }),
+                    None,
+                )
                 .await
                 .unwrap();
             assert_ne!(first.token, second.token);

@@ -1,6 +1,7 @@
 import { PresentationSessionSchema, ProjectSchema, type PresentationSession, type Project } from "@showit/contracts";
 import { createSession } from "./project-workspace";
 import type { Workspace } from "./persistence";
+import { migrateLegacyBundledSample } from "./sample-project";
 
 const storagePrefix = "showit:presentation-launch:v1:";
 
@@ -76,7 +77,13 @@ export function beginPresentationLaunch(project: Project, session: PresentationS
 export function loadPresentationLaunch(projectId: string): Workspace | null {
   try {
     const stored = sessionStorage.getItem(`${storagePrefix}${projectId}`);
-    return stored ? parseWorkspace(JSON.parse(stored)) : null;
+    const workspace = stored ? parseWorkspace(JSON.parse(stored)) : null;
+    if (!workspace) return null;
+    const project = migrateLegacyBundledSample(workspace.project);
+    if (!project) return workspace;
+    const migrated = parseWorkspace({ project, session: workspace.session });
+    if (migrated) savePresentationLaunch(migrated);
+    return migrated;
   } catch {
     return null;
   }

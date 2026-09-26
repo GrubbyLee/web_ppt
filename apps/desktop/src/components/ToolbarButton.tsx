@@ -11,9 +11,10 @@ export function ToolbarButton({ icon, label, active = false, variant = "default"
   const classes = ["toolbar-button", `toolbar-button--${variant}`, active ? "is-active" : "", className ?? ""]
     .filter(Boolean)
     .join(" ");
+  const accessibleLabel = props["aria-label"] ?? (!label && typeof props.title === "string" ? props.title : undefined);
 
   return (
-    <button className={classes} aria-pressed={active} {...props}>
+    <button className={classes} aria-pressed={active} {...props} aria-label={accessibleLabel}>
       <span className="toolbar-button__icon" aria-hidden="true">
         {icon}
       </span>

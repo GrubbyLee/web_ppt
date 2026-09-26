@@ -16,6 +16,7 @@
     "typecheck": "npm run typecheck -ws --if-present",
     "test": "npm run test -ws --if-present",
     "test:extension-browser": "node scripts/playwright-extension-smoke.mjs",
+    "test:full-ui": "node scripts/playwright-full-audit.mjs",
     "test:sfu": "npm run livekit:prepare -w @showit/desktop && node scripts/playwright-livekit-smoke.mjs",
     "tauri:dev": "npm run tauri:dev -w @showit/desktop",
     "tauri:build": "npm run tauri:build -w @showit/desktop",

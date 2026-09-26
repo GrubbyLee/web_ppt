@@ -240,8 +240,8 @@ export function SettingsDrawer({
             <>
               <span className="lan-share__count">在线 {audienceSessionStatus?.audienceCount ?? session.audienceCount}/{audienceSessionStatus?.capacity ?? (project.audienceCapacityMode === "sfu-20" ? 20 : 5)}</span>
               <code>{audienceShareUrl}</code>
-              <button type="button" title="复制局域网观众链接" onClick={() => void navigator.clipboard.writeText(audienceShareUrl)}><Copy size={15} /></button>
-              <button type="button" title="停止局域网分享" onClick={onStopAudienceShare}><Square size={14} /></button>
+              <button type="button" aria-label="复制局域网观众链接" title="复制局域网观众链接" onClick={() => void navigator.clipboard.writeText(audienceShareUrl)}><Copy size={15} /></button>
+              <button type="button" aria-label="停止局域网分享" title="停止局域网分享" onClick={onStopAudienceShare}><Square size={14} /></button>
             </>
           ) : (
             <button type="button" className="lan-share__start" onClick={onStartAudienceShare}><Radio size={15} />启动局域网分享</button>
@@ -268,7 +268,7 @@ export function SettingsDrawer({
             {(audienceSessionStatus?.viewers.length ?? 0) === 0 ? <p>暂无观众</p> : audienceSessionStatus?.viewers.map((viewer) => (
               <div key={viewer.id} data-state={viewer.status}>
                 <span><strong>{viewer.displayName}</strong><small>{viewer.ip} · {viewer.status === "pending" ? "等待批准" : viewer.status === "approved" ? "正在连接" : `已连接 · ${viewer.quality === "good" ? "质量良好" : viewer.quality === "fair" ? "质量一般" : viewer.quality === "poor" ? "质量较差" : "正在测量"}`}</small></span>
-                {viewer.status === "pending" ? <><button type="button" title={`批准 ${viewer.displayName}`} onClick={() => onDecideViewer(viewer.id, true)}><UserCheck size={14} /></button><button type="button" title={`拒绝 ${viewer.displayName}`} onClick={() => onDecideViewer(viewer.id, false)}><UserX size={14} /></button></> : <button type="button" title={`断开 ${viewer.displayName}`} onClick={() => onDisconnectViewer(viewer.id)}><WifiOff size={14} /></button>}
+                {viewer.status === "pending" ? <><button type="button" aria-label={`批准 ${viewer.displayName}`} title={`批准 ${viewer.displayName}`} onClick={() => onDecideViewer(viewer.id, true)}><UserCheck size={14} /></button><button type="button" aria-label={`拒绝 ${viewer.displayName}`} title={`拒绝 ${viewer.displayName}`} onClick={() => onDecideViewer(viewer.id, false)}><UserX size={14} /></button></> : <button type="button" aria-label={`断开 ${viewer.displayName}`} title={`断开 ${viewer.displayName}`} onClick={() => onDisconnectViewer(viewer.id)}><WifiOff size={14} /></button>}
               </div>
             ))}
           </div>
@@ -278,7 +278,7 @@ export function SettingsDrawer({
       <section className="settings-section">
         <h2>
           <ShieldCheck size={16} /> 演前检查
-          <button type="button" title="导出演前记录" onClick={() => downloadPreflightReport(project, preflight)}><Download size={14} /></button>
+          <button type="button" aria-label="导出演前记录" title="导出演前记录" onClick={() => downloadPreflightReport(project, preflight)}><Download size={14} /></button>
         </h2>
         <ul className="preflight-list">
           {preflight.items.map((item) => <li key={item.id} data-state={item.state}>{item.message}</li>)}
@@ -288,7 +288,7 @@ export function SettingsDrawer({
       <section className="settings-section">
         <h2>
           <RefreshCw size={16} /> 业务连接检测
-          <button type="button" title="重新检查业务连接" disabled={healthChecking} onClick={() => void runHealthChecks()}><RefreshCw size={14} /></button>
+          <button type="button" aria-label="重新检查业务连接" title="重新检查业务连接" disabled={healthChecking} onClick={() => void runHealthChecks()}><RefreshCw size={14} /></button>
         </h2>
         {healthChecking && healthItems.length === 0 ? <p className="settings-empty">正在检查业务页面...</p> : <ul className="preflight-list health-list">{healthItems.map((item) => <li key={item.id} data-state={item.state}>{item.message}</li>)}</ul>}
       </section>
@@ -303,8 +303,16 @@ export function SettingsDrawer({
             <dd>开始/暂停计时</dd>
           </div>
           <div>
-            <dt>← / →</dt>
+            <dt>← / → / ↑ / ↓</dt>
             <dd>切换页面</dd>
+          </div>
+          <div>
+            <dt>PageUp / PageDown / Home / End</dt>
+            <dd>翻页或跳到首尾</dd>
+          </div>
+          <div>
+            <dt>L / C / X</dt>
+            <dd>激光笔、圈选、清除标注</dd>
           </div>
           <div>
             <dt>B / W / F</dt>
@@ -312,7 +320,11 @@ export function SettingsDrawer({
           </div>
           <div>
             <dt>Esc</dt>
-            <dd>恢复正常观众屏</dd>
+            <dd>恢复观众屏、退出标注或打开页面网格</dd>
+          </div>
+          <div>
+            <dt>A / R / ?</dt>
+            <dd>自动翻页、排练、快捷键帮助</dd>
           </div>
         </dl>
       </section>
@@ -320,8 +332,8 @@ export function SettingsDrawer({
       <section className="settings-section">
         <h2>
           <Bug size={16} /> 本机诊断
-          <button type="button" title="导出脱敏诊断记录" disabled={diagnostics.length === 0} onClick={() => void downloadDiagnostics()}><Download size={14} /></button>
-          <button type="button" title="清理诊断记录" disabled={diagnostics.length === 0} onClick={() => { clearDiagnostics(); setDiagnostics([]); }}><Trash2 size={14} /></button>
+          <button type="button" aria-label="导出脱敏诊断记录" title="导出脱敏诊断记录" disabled={diagnostics.length === 0} onClick={() => void downloadDiagnostics()}><Download size={14} /></button>
+          <button type="button" aria-label="清理诊断记录" title="清理诊断记录" disabled={diagnostics.length === 0} onClick={() => { clearDiagnostics(); setDiagnostics([]); }}><Trash2 size={14} /></button>
         </h2>
         <p className="settings-empty">导出包含已脱敏的运行时与桌面本机服务诊断，不包含截图、视频和业务内容。</p>
         {diagnostics.length === 0 ? <p className="settings-empty">暂无诊断记录</p> : <div className="diagnostic-list">{diagnostics.slice(0, 5).map((entry) => <div key={entry.traceId}><code>{entry.traceId}</code><span>{entry.area}</span><small>{new Date(entry.at).toLocaleString("zh-CN")}</small></div>)}</div>}
@@ -335,7 +347,7 @@ export function SettingsDrawer({
           <div className="rehearsal-list">
             {rehearsals.slice(0, 5).map((rehearsal) => {
               const overrunPages = rehearsal.pages.filter((page) => page.actualMs > page.plannedMs).length;
-              return <div key={rehearsal.id}><span>{new Date(rehearsal.endedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span><strong>{formatDuration(rehearsal.totalElapsedMs)}</strong><small>{overrunPages} 页超时</small><button type="button" title="导出排练报告" onClick={() => downloadRehearsalReport(project, rehearsal)}><Download size={14} /></button></div>;
+              return <div key={rehearsal.id}><span>{new Date(rehearsal.endedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span><strong>{formatDuration(rehearsal.totalElapsedMs)}</strong><small>{overrunPages} 页超时</small><button type="button" aria-label="导出排练报告" title="导出排练报告" onClick={() => downloadRehearsalReport(project, rehearsal)}><Download size={14} /></button></div>;
             })}
           </div>
         )}

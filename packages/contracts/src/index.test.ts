@@ -165,6 +165,21 @@ describe("connector contract", () => {
     }
     expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, loginPaths: ["/login", "/sso/callback"] }).success).toBe(true);
   });
+
+  it("supports configurable session and role probes without accepting unsafe paths or fields", () => {
+    const sessionProbe = {
+      path: "/api/session/current",
+      userPath: ["payload", "principal"],
+      primaryRoleField: "primaryRole",
+      rolesField: "grants",
+      roleMappings: [{ presentationRole: "审批人", connectorRole: "reviewer" }]
+    };
+    expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, sessionProbe }).success).toBe(true);
+    for (const path of ["session/current", "//evil.example/me", "/api/../session", "/api/session?debug=1"]) {
+      expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, sessionProbe: { ...sessionProbe, path } }).success, path).toBe(false);
+    }
+    expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, sessionProbe: { ...sessionProbe, primaryRoleField: "role.name" } }).success).toBe(false);
+  });
 });
 
 describe("offline fallback contract", () => {

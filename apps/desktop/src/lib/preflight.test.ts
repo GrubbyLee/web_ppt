@@ -68,4 +68,20 @@ describe("project preflight", () => {
     expect(report.errors.some((item) => item.id.startsWith("offline-"))).toBe(false);
     expect(report.items.some((item) => item.id.startsWith("offline-") && item.state === "ok")).toBe(true);
   });
+
+  it("checks configured connector role mappings while allowing login-only probes", () => {
+    const project = createProject("会话预检项目");
+    project.connectors = [{
+      id: "connector", name: "业务连接器", origin: "https://example.com", mode: "iframe", permission: "observe", securityMode: "interactive", environment: "test", requestHeaders: [], basicAuthInstructions: "", loginPaths: [], logoutPaths: [], sandboxPermissions: ["allow-scripts"], allowedOrigins: ["https://example.com"],
+      sessionProbe: { path: "/api/me", userPath: ["data", "user"], primaryRoleField: "role", rolesField: "roles", roleMappings: [{ presentationRole: "演讲者", connectorRole: "speaker" }, { presentationRole: "演讲者", connectorRole: "speaker-alt" }] }
+    }];
+    project.pages[0] = { ...project.pages[0]!, connectorId: "connector", url: "https://example.com/page" };
+    const duplicateReport = runProjectPreflight(project);
+    expect(duplicateReport.errors.some((item) => item.id === "session-role-mapping-connector")).toBe(true);
+    project.connectors[0]!.sessionProbe!.roleMappings = [{ presentationRole: "其他角色", connectorRole: "other" }];
+    const missingReport = runProjectPreflight(project);
+    expect(missingReport.warnings.some((item) => item.id === `session-role-${project.pages[0]!.id}`)).toBe(true);
+    project.connectors[0]!.sessionProbe!.roleMappings = [];
+    expect(runProjectPreflight(project).warnings.some((item) => item.id.startsWith("session-role-"))).toBe(false);
+  });
 });

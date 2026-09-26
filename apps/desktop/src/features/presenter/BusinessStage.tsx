@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Circle,
+  Crosshair,
   Eraser,
   EyeOff,
   ExternalLink,
   Grid2X2,
   HardDriveDownload,
   LogIn,
-  MousePointer2,
   RefreshCw,
   ScanEye,
   ScanSearch,
@@ -24,12 +24,15 @@ import { BusinessPreview } from "./BusinessPreview";
 import { OfflineFallback } from "../../components/OfflineFallback";
 import { isOfflineFallbackReady } from "../../lib/offline-fallback";
 import { checkBusinessUrl, configureReadonlyProxy, openBusinessBrowser, type BusinessUrlHealth } from "../../lib/persistence";
+import { probeConnectorSession, supportsConnectorSessionProbe, type ConnectorSessionState } from "../../lib/connector-session";
 
 type BusinessStageProps = {
   project: Project;
   session: PresentationSession;
   page: PresentationPage;
+  pageGridOpen: boolean;
   onPageSelect: (index: number) => void;
+  onPageGridOpenChange: (open: boolean) => void;
   onUrlChange: (url: string | undefined) => void;
   onAnnotationTool: (tool: PresentationSession["annotationTool"]) => void;
   onLaser: (laser: PresentationSession["laser"]) => void;
@@ -49,7 +52,9 @@ export function BusinessStage({
   project,
   session,
   page,
+  pageGridOpen,
   onPageSelect,
+  onPageGridOpenChange,
   onUrlChange,
   onAnnotationTool,
   onLaser,
@@ -64,7 +69,6 @@ export function BusinessStage({
   connectorState,
   onReadinessChange
 }: BusinessStageProps) {
-  const [gridOpen, setGridOpen] = useState(false);
   const [frameKey, setFrameKey] = useState(0);
   const [frameOpen, setFrameOpen] = useState(false);
   const [frameState, setFrameState] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -74,14 +78,20 @@ export function BusinessStage({
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [loadHealth, setLoadHealth] = useState<BusinessUrlHealth | null>(null);
   const [proxyUrl, setProxyUrl] = useState<string | null>(null);
+  const [sessionAccess, setSessionAccess] = useState<ConnectorSessionState | { state: "checking" } | null>(null);
+  const sessionCheckSequence = useRef(0);
+  const frameElement = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     setUrlDraft(page.url ?? "");
-    setFrameOpen(false);
+    setFrameOpen(Boolean(page.url));
     setFrameState("idle");
     setUsingFallback(false);
     setLoadHealth(null);
     setProxyUrl(null);
+    setBrowserError(null);
+    setSessionAccess(null);
+    sessionCheckSequence.current += 1;
   }, [page.id, page.url]);
 
   const urlState = useMemo(() => validateBusinessUrlTemplate(urlDraft), [urlDraft]);
@@ -99,6 +109,25 @@ export function BusinessStage({
   const opensInFrame = !connector || connector.mode === "iframe";
   const frameTargetUrl = requiresReadonlyProxy ? proxyUrl : activeUrlValue;
   const canRenderFrame = Boolean(!offlineActive && frameOpen && opensInFrame && frameTargetUrl && session.screenMode === "normal");
+  const connectionLabel = connectorState
+    ? connectorState.state === "ready" ? "扩展已就绪"
+      : connectorState.state === "anonymous" ? "需要登录"
+        : connectorState.state === "role-mismatch" ? "角色不匹配"
+          : connectorState.state === "blocked" ? "控制已暂停"
+            : connectorState.state === "error" ? "扩展不可用"
+              : "正在检查扩展"
+    : opensInFrame
+      ? sessionAccess?.state === "anonymous" ? "需要登录"
+        : sessionAccess?.state === "role-mismatch" ? "角色不匹配"
+          : sessionAccess?.state === "error" ? "会话检查失败"
+            : sessionAccess?.state === "checking" ? "正在检查角色"
+              : sessionAccess?.state === "ready" ? "角色就绪"
+                : frameState === "ready" ? "只读页面已就绪"
+        : frameState === "loading" ? "正在加载只读页面"
+          : frameState === "error" ? "业务页不可用"
+            : "准备只读页面"
+      : "独立窗口模式";
+  const sessionAccessReason = sessionAccess && "reason" in sessionAccess ? sessionAccess.reason : null;
 
   useEffect(() => {
     setProxyUrl(null);
@@ -106,9 +135,13 @@ export function BusinessStage({
     let current = true;
     configureReadonlyProxy(project.id, connector, activeUrlValue)
       .then((url) => { if (current) setProxyUrl(url); })
-      .catch((error) => { if (current) setBrowserError(error instanceof Error ? error.message : "只读代理无法启动。"); });
+      .catch((error) => {
+        if (!current) return;
+        setBrowserError(error instanceof Error ? error.message : "只读代理无法启动。");
+        setFrameState("error");
+      });
     return () => { current = false; };
-  }, [activeUrlValue, connector, project.id, requiresReadonlyProxy]);
+  }, [activeUrlValue, connector, page.id, project.id, requiresReadonlyProxy]);
 
   useEffect(() => {
     const currentIndex = project.pages.findIndex((candidate) => candidate.id === page.id);
@@ -127,9 +160,40 @@ export function BusinessStage({
   }, [page.id, project]);
 
   useEffect(() => {
-    onReadinessChange(frameState !== "loading" && frameState !== "error" && browserError === null);
+    const accessReady = !sessionAccess || sessionAccess.state === "ready";
+    const frameReady = !opensInFrame || !activeUrlValue || (frameState === "ready" && accessReady);
+    onReadinessChange((page.pageType === "end" || offlineActive || frameReady) && browserError === null);
     return () => onReadinessChange(false);
-  }, [browserError, frameState, onReadinessChange, page.id]);
+  }, [activeUrlValue, browserError, frameState, offlineActive, onReadinessChange, opensInFrame, page.id, page.pageType, sessionAccess]);
+
+  const checkFrameSession = useCallback(() => {
+    if (!connector || !frameTargetUrl || !supportsConnectorSessionProbe(connector)) {
+      setSessionAccess(null);
+      return;
+    }
+    const sequence = ++sessionCheckSequence.current;
+    setSessionAccess({ state: "checking" });
+    void probeConnectorSession(frameTargetUrl, page.role, connector).then((result) => {
+      if (sessionCheckSequence.current === sequence) setSessionAccess(result);
+    });
+  }, [connector, frameTargetUrl, page.role]);
+
+  useEffect(() => {
+    if (!frameTargetUrl || !connector || !supportsConnectorSessionProbe(connector)) return;
+    const frameOrigin = new URL(frameTargetUrl).origin;
+    const onMessage = (event: MessageEvent<unknown>) => {
+      const payload = event.data as { __showitConnectorSession?: unknown } | null;
+      if (event.origin !== frameOrigin || event.source !== frameElement.current?.contentWindow || payload?.__showitConnectorSession !== 1) return;
+      checkFrameSession();
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [checkFrameSession, connector, frameTargetUrl]);
+
+  const handleFrameLoad = () => {
+    setFrameState("ready");
+    checkFrameSession();
+  };
 
   useEffect(() => {
     if (!canRenderFrame) return;
@@ -151,7 +215,7 @@ export function BusinessStage({
     setBrowserError(null);
     try {
       const target = requiresReadonlyProxy && connector ? await configureReadonlyProxy(project.id, connector, url) : url;
-      await openBusinessBrowser(target, project.id, session.browserSessionMode === "dedicated");
+      await openBusinessBrowser(target, project.id, session.browserSessionMode === "dedicated", requiresReadonlyProxy);
     } catch (error) {
       setBrowserError(error instanceof Error ? error.message : "无法打开业务浏览器。");
     }
@@ -198,8 +262,8 @@ export function BusinessStage({
             icon={<Grid2X2 size={16} />}
             label="页面"
             title="打开页面选择网格"
-            active={gridOpen}
-            onClick={() => setGridOpen((open) => !open)}
+            active={pageGridOpen}
+            onClick={() => onPageGridOpenChange(!pageGridOpen)}
           />
           <ToolbarButton
             icon={<RefreshCw size={16} />}
@@ -209,21 +273,23 @@ export function BusinessStage({
               setFrameKey((key) => key + 1);
               setFrameOpen(true);
               setFrameState("loading");
+              setSessionAccess(null);
+              sessionCheckSequence.current += 1;
             }}
           />
           <ToolbarButton icon={<LogIn size={16} />} label="系统登录" title="在独立业务窗口中登录或聚焦" disabled={!activeUrl?.ok} onClick={() => openBusinessWindow()} />
           <ToolbarButton icon={<HardDriveDownload size={16} />} label="备用" title="切换当前页离线备用内容" disabled={!isOfflineFallbackReady(page.offline)} active={offlineActive} onClick={() => onOfflineFallback(!offlineActive)} />
           <ToolbarButton
-            icon={<MousePointer2 size={16} />}
+            icon={<Crosshair size={16} />}
             label="激光"
-            title="启用激光笔"
+            title="启用激光笔（L）"
             active={session.annotationTool === "laser"}
             onClick={() => onAnnotationTool(session.annotationTool === "laser" ? "none" : "laser")}
           />
           <ToolbarButton
             icon={<Circle size={16} />}
             label="圈选"
-            title="启用圈选"
+            title="启用圈选（C）"
             active={session.annotationTool === "circle"}
             onClick={() => onAnnotationTool(session.annotationTool === "circle" ? "none" : "circle")}
           />
@@ -236,12 +302,12 @@ export function BusinessStage({
           />
           <ToolbarButton icon={<ScanEye size={16} />} label="模糊" title="切换新建隐私遮罩为实色或模糊" active={maskMode === "blur"} onClick={() => setMaskMode((mode) => mode === "solid" ? "blur" : "solid")} />
           <ToolbarButton icon={<ScanSearch size={16} />} label="绑定" title="在业务标签中选择需要持续遮挡的元素" active={maskPickerActive} disabled={maskPickerActive} onClick={() => onBindMask(maskMode)} />
-          <ToolbarButton icon={<Eraser size={16} />} label="清除" title="清除标注" onClick={onClear} />
+          <ToolbarButton icon={<Eraser size={16} />} label="清除" title="清除标注（X）" onClick={onClear} />
           <ToolbarButton icon={<ShieldOff size={16} />} title="清除当前页隐私遮罩" disabled={page.privacyMasks.length === 0} onClick={onClearMasks} />
         </div>
       </div>
 
-      {gridOpen ? (
+      {pageGridOpen ? (
         <div className="page-grid" role="listbox" aria-label="页面选择">
           {project.pages.map((candidate, index) => (
             <button
@@ -250,7 +316,7 @@ export function BusinessStage({
               className={index === session.currentPageIndex ? "is-current" : ""}
               onClick={() => {
                 onPageSelect(index);
-                setGridOpen(false);
+                onPageGridOpenChange(false);
               }}
             >
               <span>{String(index + 1).padStart(2, "0")}</span>
@@ -264,9 +330,9 @@ export function BusinessStage({
       <div className="business-frame-wrap">
         <div className="stage-status-strip">
           <span>
-            <ShieldCheck size={14} /> {connector?.name ?? "未配置连接器"} · {connectorState ? connectorState.state === "ready" ? "角色就绪" : connectorState.state === "anonymous" ? "需要登录" : connectorState.state === "role-mismatch" ? "角色不匹配" : connectorState.state === "blocked" ? "控制已暂停" : connectorState.state === "error" ? "连接异常" : "正在检查" : connector?.permission === "observe" ? "观察模式" : connector?.permission === "automate" ? "自动操作" : "协助模式"}
+            <ShieldCheck size={14} /> {connector?.name ?? "未配置连接器"} · {connectionLabel}
           </span>
-          <span>{browserError ?? connectorState?.reason ?? connectorState?.role ?? connectorState?.title ?? (frameState === "loading" ? "正在加载业务页" : frameState === "ready" ? usingFallback ? "备用业务页已加载" : "业务页已加载" : activeUrl && !activeUrl.ok ? activeUrl.errors[0] : urlState.valid ? "离线参考画面" : urlState.reason)}{connectorState?.resourceFailures ? ` · 资源失败 ${connectorState.resourceFailures}` : ""}</span>
+          <span>{browserError ?? connectorState?.reason ?? sessionAccessReason ?? connectorState?.role ?? connectorState?.title ?? (frameState === "loading" ? "正在加载业务页" : frameState === "ready" ? usingFallback ? "备用业务页已加载" : "业务页已加载" : activeUrl && !activeUrl.ok ? activeUrl.errors[0] : urlState.valid ? "离线参考画面" : urlState.reason)}{connectorState?.resourceFailures ? ` · 资源失败 ${connectorState.resourceFailures}` : ""}</span>
           {activeUrl?.ok ? (
             <button type="button" className="stage-external-link" onClick={() => openBusinessWindow()}>
               新窗口 <ExternalLink size={13} />
@@ -275,16 +341,17 @@ export function BusinessStage({
         </div>
         {page.pageType === "end" ? <section className="business-end-page"><strong>{project.brand.endTitle}</strong><span>{project.brand.endDescription}</span></section> : offlineActive ? <OfflineFallback fallback={page.offline} label={project.brand.offlineLabel} sessionAllowedNetworkOrigins={sessionAllowedNetworkOrigins} onNetworkOriginRequest={onOfflineNetworkOriginRequest} /> : canRenderFrame ? (
           <iframe
+            ref={frameElement}
             key={`${page.id}-${frameKey}-${usingFallback ? "fallback" : "primary"}`}
             title={page.title}
             src={frameTargetUrl ?? undefined}
             sandbox={sandbox}
-            referrerPolicy="no-referrer"
-            onLoad={() => setFrameState("ready")}
+            referrerPolicy="origin"
+            onLoad={handleFrameLoad}
             onError={() => setFrameState("error")}
           />
         ) : (
-          <BusinessPreview page={page} />
+          <BusinessPreview project={project} page={page} />
         )}
         {frameState === "error" && session.screenMode === "normal" ? (
           <div className="business-frame-error" role="alert">
@@ -293,7 +360,7 @@ export function BusinessStage({
             <span>{activeUrl?.ok ? activeUrl.value : "URL 无效"}</span>
             <span>{connector?.name ?? "未配置连接器"} · {loadHealth ? loadHealth.status !== null ? `HTTP ${loadHealth.status}` : loadHealth.error ?? "无法连接" : "正在检查 HTTP 状态"}</span>
             <div>
-              <button type="button" onClick={() => { setFrameKey((key) => key + 1); setFrameState("loading"); }}>重试</button>
+              <button type="button" onClick={() => { setFrameKey((key) => key + 1); setFrameState("loading"); setSessionAccess(null); sessionCheckSequence.current += 1; }}>重试</button>
               {fallbackUrl?.ok && !usingFallback ? <button type="button" onClick={() => { setUsingFallback(true); setFrameKey((key) => key + 1); }}>备用 URL</button> : null}
               <button type="button" onClick={() => openBusinessWindow()}>新窗口</button>
             </div>
@@ -320,7 +387,7 @@ export function BusinessStage({
       <footer className="stage-page-meta">
         <strong>{page.title}</strong>
         <span>
-          {page.role} · 第 {session.currentPageIndex + 1} 页 · {session.screenMode === "normal" ? "连接器就绪" : "屏幕控制中"}
+          {page.role} · 第 {session.currentPageIndex + 1} 页 · {session.screenMode === "normal" ? connectionLabel : "屏幕控制中"}
         </span>
       </footer>
     </section>

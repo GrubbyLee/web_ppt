@@ -5,14 +5,13 @@ import { Button, Input, Modal } from "antd";
 import { createAudienceChannel, publishSnapshot } from "../../lib/audience-sync";
 import { clearReadonlyProxy, decideAudienceViewer, disconnectAllAudienceViewers, disconnectAudienceViewer, focusMainWindow, getAudienceSessionStatus, listAudienceNetworkInterfaces, listenAudienceWindowClosed, listenExtensionMessages, loadRuntimeSession, openAudienceWindow, loadWorkspace, publishAudienceSession, saveRuntimeSession, sendExtensionMessage, startAudienceSession, stopAudienceSession, type AudienceNetworkInterface, type AudienceSessionStatus, type AudienceShare } from "../../lib/persistence";
 import { listRehearsals, saveRehearsal } from "../../lib/persistence";
-import { sampleProject, sampleSession } from "../../lib/sample-project";
 import { autoAdvanceElapsedMs, usePresentationStore } from "../../stores/presentation-store";
 import { canAutoContinueAfterVerification } from "../../lib/step-runtime";
 import { BusinessStage } from "./BusinessStage";
 import { NotesPanel } from "./NotesPanel";
 import { PresentationFooter } from "./PresentationFooter";
 import { PresenterTopBar } from "./PresenterTopBar";
-import { createSessionId, ElementLocatorSchema, PresentationSessionSchema, ProjectSchema, type PresentationStep, type ScreenMode } from "@showit/contracts";
+import { ElementLocatorSchema, PresentationSessionSchema, ProjectSchema, type PresentationStep, type ScreenMode } from "@showit/contracts";
 import type { Rehearsal } from "@showit/contracts";
 import { recordDiagnostic } from "../../lib/diagnostics";
 import { clearRuntimeSecrets, missingRuntimeSecrets, setRuntimeSecrets } from "../../lib/runtime-secrets";
@@ -20,6 +19,7 @@ import { applyProjectToPresentation, beginPresentationLaunch, loadPresentationLa
 import { resolveRecordedAction } from "../../lib/step-action";
 import { shutdownPresentationRuntime } from "../../lib/presentation-shutdown";
 import { inspectProjectImport, projectTrustState, trustProject } from "../../lib/project-trust";
+import { startExtensionProbe, type ExtensionProbeState } from "../../lib/connector-probe";
 
 const SettingsDrawer = lazy(() => import("./SettingsDrawer").then((module) => ({ default: module.SettingsDrawer })));
 
@@ -74,6 +74,7 @@ export function PresenterShell() {
   const now = useClock();
   const narrow = useNarrowLayout();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prompterOpen, setPrompterOpen] = useState(false);
   const [rehearsals, setRehearsals] = useState<Rehearsal[]>([]);
   const [audienceShare, setAudienceShare] = useState<AudienceShare | null>(null);
   const [audienceSessionStatus, setAudienceSessionStatus] = useState<AudienceSessionStatus | null>(null);
@@ -86,6 +87,7 @@ export function PresenterShell() {
   const [maskPickerActive, setMaskPickerActive] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
   const [businessReady, setBusinessReady] = useState(false);
+  const [pageGridOpen, setPageGridOpen] = useState(false);
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
   const [secretPromptOpen, setSecretPromptOpen] = useState(false);
   const [trustBlocked, setTrustBlocked] = useState(false);
@@ -143,6 +145,7 @@ export function PresenterShell() {
   const handledCommandIds = useRef(new Set<string>());
   const pendingStepOperations = useRef(new Map<string, { sessionId: string; stepId: string }>());
   const pendingMaskPicker = useRef<{ requestId: string; pageId: string; mode: "solid" | "blur"; timeoutId: number } | null>(null);
+  const connectorProbe = useRef<ReturnType<typeof startExtensionProbe> | null>(null);
   const closing = useRef(false);
 
   const markStepFailed = useCallback((stepId: string, reason: unknown) => {
@@ -232,6 +235,19 @@ export function PresenterShell() {
     void beginRecordedStep(current.project, current.session, next);
   }, [beginRecordedStep]);
 
+  const toggleRehearsal = useCallback(() => {
+    if (usePresentationStore.getState().rehearsalStartedAt === null) {
+      startRehearsal();
+      return;
+    }
+    const record = finishRehearsal();
+    if (!record) return;
+    saveRehearsal(record)
+      .then(() => listRehearsals(project.id))
+      .then(setRehearsals)
+      .catch((error) => { recordDiagnostic("保存排练记录", error); setSaveState("error"); });
+  }, [finishRehearsal, project.id, setSaveState, startRehearsal]);
+
   useEffect(() => {
     pendingStepOperations.current.clear();
     setStepExecution(null);
@@ -276,11 +292,11 @@ export function PresenterShell() {
           setWorkspace(launch.project, launch.session);
           return;
         }
-        setWorkspace(sampleProject, { ...sampleSession, id: createSessionId() });
+        navigate("/projects", { replace: true });
       })
       .catch((error) => {
         recordDiagnostic("加载演示项目", error);
-        if (mounted) setWorkspace(sampleProject, { ...sampleSession, id: createSessionId() });
+        if (mounted) navigate("/projects", { replace: true });
       });
     return () => {
       mounted = false;
@@ -469,7 +485,13 @@ export function PresenterShell() {
       if (command.type === "goto-prev-step") current.previousStep();
       if (command.type === "focus-showit") void focusMainWindow();
       if (command.type === "connector-probe") {
-        const probe = message as { hasPasswordField?: unknown; privacyRisk?: unknown; title?: unknown; reason?: unknown; state?: unknown };
+        const probe = message as { connectorId?: unknown; origin?: unknown; hasPasswordField?: unknown; privacyRisk?: unknown; title?: unknown; reason?: unknown; state?: unknown };
+        const activePage = current.project.pages[current.session.currentPageIndex];
+        const activeConnector = current.project.connectors.find((item) => item.id === activePage?.connectorId);
+        let activeOrigin: string | null = null;
+        try { activeOrigin = activeConnector ? new URL(activeConnector.origin).origin : null; } catch { activeOrigin = null; }
+        if (!activeConnector || probe.connectorId !== activeConnector.id || probe.origin !== activeOrigin) return;
+        connectorProbe.current?.settle();
         const privacyRisk = typeof probe.privacyRisk === "string" && ["password", "file", "mfa", "sso"].includes(probe.privacyRisk) ? probe.privacyRisk : null;
         const state = privacyRisk === "file" ? "blocked" : privacyRisk ? "anonymous" : connectorStates.has(probe.state as ConnectorRuntimeState["state"]) ? probe.state as ConnectorRuntimeState["state"] : "ready";
         setConnectorState({
@@ -548,9 +570,22 @@ export function PresenterShell() {
 
   useEffect(() => {
     if (!hydrated) return;
-    setConnectorState({ state: "loading" });
-    sendExtensionMessage({ type: "probe-active-tab", sessionId: session.id }).catch(() => setConnectorState(null));
-  }, [hydrated, project.id, session.currentPageIndex, session.id]);
+    connectorProbe.current?.dispose();
+    const connector = project.connectors.find((item) => item.id === page?.connectorId);
+    if (connector?.mode !== "extension") {
+      connectorProbe.current = null;
+      setConnectorState(null);
+      return;
+    }
+    connectorProbe.current = startExtensionProbe(
+      () => sendExtensionMessage({ type: "probe-active-tab", sessionId: session.id, connectorId: connector.id, origin: connector.origin }),
+      (state: ExtensionProbeState) => setConnectorState(state)
+    );
+    return () => {
+      connectorProbe.current?.dispose();
+      connectorProbe.current = null;
+    };
+  }, [hydrated, page?.connectorId, project.connectors, project.id, session.currentPageIndex, session.id]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -607,27 +642,57 @@ export function PresenterShell() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (hasEditableTarget(event)) return;
-      if (event.key === "ArrowRight") {
+      if (hasEditableTarget(event) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (["ArrowRight", "ArrowDown", "PageDown"].includes(event.key)) {
         event.preventDefault();
         setActivePage(session.currentPageIndex + 1);
       }
-      if (event.key === "ArrowLeft") {
+      if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
         event.preventDefault();
         setActivePage(session.currentPageIndex - 1);
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        setActivePage(0);
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        setActivePage(project.pages.length - 1);
       }
       if (event.key === " ") {
         event.preventDefault();
         session.timerStatus === "running" ? pauseTimer() : startTimer();
       }
-      if (event.key.toLowerCase() === "b") setScreenMode("black");
-      if (event.key.toLowerCase() === "w") setScreenMode("white");
-      if (event.key.toLowerCase() === "f") setScreenMode("frozen");
-      if (event.key === "Escape") setScreenMode("normal");
+      if (event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        setAnnotationTool(session.annotationTool === "laser" ? "none" : "laser");
+      }
+      if (event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        setAnnotationTool(session.annotationTool === "circle" ? "none" : "circle");
+      }
+      if (event.key.toLowerCase() === "x") {
+        event.preventDefault();
+        clearAnnotations();
+      }
+      if (event.key.toLowerCase() === "b") { event.preventDefault(); setScreenMode(session.screenMode === "black" ? "normal" : "black"); }
+      if (event.key.toLowerCase() === "w") { event.preventDefault(); setScreenMode(session.screenMode === "white" ? "normal" : "white"); }
+      if (event.key.toLowerCase() === "f") { event.preventDefault(); setScreenMode(session.screenMode === "frozen" ? "normal" : "frozen"); }
+      if (event.key.toLowerCase() === "a") { event.preventDefault(); setAutoAdvance(!project.autoAdvanceEnabled); }
+      if (event.key.toLowerCase() === "r") { event.preventDefault(); toggleRehearsal(); }
+      if (event.key.toLowerCase() === "p") { event.preventDefault(); setPrompterOpen((open) => !open); }
+      if (event.key === "?" || event.key === "/") { event.preventDefault(); setSettingsOpen(true); }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (session.screenMode !== "normal") setScreenMode("normal");
+        else if (prompterOpen) setPrompterOpen(false);
+        else if (session.annotationTool !== "none") setAnnotationTool("none");
+        else setPageGridOpen((open) => !open);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pauseTimer, session.currentPageIndex, session.timerStatus, setActivePage, setScreenMode, startTimer]);
+  }, [clearAnnotations, pauseTimer, project.autoAdvanceEnabled, project.pages.length, prompterOpen, session.annotationTool, session.currentPageIndex, session.screenMode, session.timerStatus, setActivePage, setAnnotationTool, setAutoAdvance, setScreenMode, startTimer, toggleRehearsal]);
 
   useEffect(() => {
     if (!session.laser) return;
@@ -698,7 +763,7 @@ export function PresenterShell() {
   }
 
   return (
-    <main className="presenter-shell">
+    <main className={`presenter-shell ${prompterOpen ? "is-prompter" : ""}`}>
       <PresenterTopBar
         project={project}
         session={session}
@@ -738,16 +803,29 @@ export function PresenterShell() {
               setConnectorState({ state: "error", reason: "无法读取项目编辑器的最新修改。" });
             });
         }}
+        prompterOpen={prompterOpen}
+        onTogglePrompter={() => setPrompterOpen((open) => !open)}
         onOpenAudience={() => {
           const open = async () => {
             let share = audienceShare;
+            let started = false;
             if (!share) {
               share = await startAudienceSession(project, session, audienceNetworkAddress || undefined);
+              started = true;
               setAudienceShare(share);
               setAudienceSessionStatus({ audienceCount: 0, capacity: project.audienceCapacityMode === "sfu-20" ? 20 : 5, viewers: [] });
               setAudienceCount(0);
             }
-            await openAudienceWindow(session.id);
+            try {
+              await openAudienceWindow(session.id);
+            } catch (error) {
+              if (started && share) {
+                await stopAudienceSession(share.sessionId).catch((stopError) => recordDiagnostic("回滚观众会话", stopError));
+                setAudienceShare(null);
+                setAudienceSessionStatus(null);
+              }
+              throw error;
+            }
           };
           open().catch((error) => { recordDiagnostic("打开本机观众屏", error); audienceDisconnected(); });
         }}
@@ -766,12 +844,14 @@ export function PresenterShell() {
             if (!narrow && typeof layout.stage === "number") setStagePercent(layout.stage);
           }}
         >
-          <Panel id="stage" minSize={narrow ? "45%" : "50%"} maxSize={narrow ? "70%" : "75%"}>
+          <Panel id="stage" className="stage-panel" minSize={narrow ? "45%" : "50%"} maxSize={narrow ? "70%" : "75%"}>
             <BusinessStage
               project={project}
               session={session}
               page={page}
+              pageGridOpen={pageGridOpen}
               onPageSelect={setActivePage}
+              onPageGridOpenChange={setPageGridOpen}
               onUrlChange={(url) => {
                 setSaveState("saving");
                 setPageUrl(url);
@@ -795,7 +875,7 @@ export function PresenterShell() {
             title="拖拽调整分栏，双击恢复页面优先布局"
             onDoubleClick={() => setLayoutPreset("stage")}
           />
-          <Panel id="notes" minSize={narrow ? "30%" : "25%"}>
+          <Panel id="notes" className="notes-panel-container" minSize={narrow ? "30%" : "25%"}>
             <NotesPanel
               project={project}
               session={session}
@@ -830,18 +910,7 @@ export function PresenterShell() {
         onPause={pauseTimer}
         onReset={resetTimer}
         rehearsalActive={rehearsalStartedAt !== null}
-        onRehearsal={() => {
-          if (rehearsalStartedAt === null) {
-            startRehearsal();
-            return;
-          }
-          const record = finishRehearsal();
-          if (!record) return;
-          saveRehearsal(record)
-            .then(() => listRehearsals(project.id))
-            .then(setRehearsals)
-            .catch((error) => { recordDiagnostic("保存排练记录", error); setSaveState("error"); });
-        }}
+        onRehearsal={toggleRehearsal}
       />
 
       {forceCompletion ? (

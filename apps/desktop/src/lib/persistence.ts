@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { recordExternalDiagnostic } from "./diagnostics";
+import { recordDiagnostic, recordExternalDiagnostic } from "./diagnostics";
 import {
   PresentationSessionSchema,
   ProjectSchema,
@@ -13,6 +13,8 @@ import {
   type Rehearsal
 } from "@showit/contracts";
 import { createRemoteAudienceSnapshot } from "./remote-audience-snapshot";
+import { migrateLegacyBundledSample } from "./sample-project";
+import { trustProject } from "./project-trust";
 
 const LEGACY_STORAGE_KEY = "showit:workspace:v1";
 const LIBRARY_STORAGE_KEY = "showit:library:v1";
@@ -70,6 +72,19 @@ export type BusinessUrlHealth = {
 export type BrowserProfileStatus = { exists: boolean; bytes: number };
 export type ReadonlyProxyTarget = { url: string };
 
+export function resolveBrowserReadonlyProxyUrl(connector: PresentationConnector, pageUrl: string, appOrigin: string, development: boolean): string | null {
+  try {
+    const page = new URL(pageUrl);
+    const connectorOrigin = new URL(connector.origin).origin;
+    const app = new URL(appOrigin);
+    const localApp = app.hostname === "localhost" || app.hostname === "127.0.0.1" || app.hostname === "[::1]";
+    if (!development || !localApp || page.origin !== connectorOrigin) return null;
+    return new URL(`${page.pathname}${page.search}${page.hash}`, appOrigin).toString();
+  } catch {
+    return null;
+  }
+}
+
 export function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -126,8 +141,8 @@ export async function checkBusinessUrl(url: string): Promise<BusinessUrlHealth> 
   }
 }
 
-export async function openBusinessBrowser(url: string, projectId: string, dedicated: boolean): Promise<string> {
-  if (inTauri()) return invoke<string>("open_business_browser", { url, projectId, dedicated });
+export async function openBusinessBrowser(url: string, projectId: string, dedicated: boolean, inApp = false): Promise<string> {
+  if (inTauri()) return invoke<string>("open_business_browser", { url, projectId, dedicated, inApp });
   window.open(url, dedicated ? `showit-dedicated-${projectId}` : "_blank", "popup,width=1280,height=800");
   return dedicated ? "browser-development" : "default";
 }
@@ -168,18 +183,39 @@ function writeBrowserLibrary(workspaces: Workspace[]): void {
   localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(workspaces));
 }
 
+async function migrateBundledWorkspace(workspace: Workspace | null): Promise<Workspace | null> {
+  if (!workspace) return null;
+  const project = migrateLegacyBundledSample(workspace.project);
+  if (!project) return workspace;
+  const migrated = { ...workspace, project };
+  await trustProject(project);
+  return migrated;
+}
+
 export async function listWorkspaces(): Promise<Workspace[]> {
   if (inTauri()) {
     try {
       const saved = await invoke<unknown[]>("list_workspaces");
       const parsed = saved.map(parseWorkspace).filter((item): item is Workspace => item !== null);
-      if (parsed.length > 0) return parsed;
+      if (parsed.length > 0) {
+        const migrated = await Promise.all(parsed.map(migrateBundledWorkspace)) as Workspace[];
+        const writes = await Promise.allSettled(migrated.map((workspace, index) => workspace === parsed[index]
+          ? Promise.resolve()
+          : invoke("save_workspace", { workspace })));
+        writes.forEach((result, index) => {
+          if (result.status === "rejected") recordDiagnostic("项目迁移回写", result.reason);
+        });
+        return migrated;
+      }
     } catch {
       // Browser storage remains a recovery path if desktop persistence is unavailable.
     }
   }
 
-  return readBrowserLibrary();
+  const stored = readBrowserLibrary();
+  const workspaces = await Promise.all(stored.map(migrateBundledWorkspace)) as Workspace[];
+  if (workspaces.some((workspace, index) => workspace !== stored[index])) writeBrowserLibrary(workspaces);
+  return workspaces;
 }
 
 export async function loadWorkspace(projectId?: string): Promise<Workspace | null> {
@@ -187,7 +223,17 @@ export async function loadWorkspace(projectId?: string): Promise<Workspace | nul
     try {
       const saved = await invoke<unknown>("load_workspace", { projectId: projectId ?? null });
       const parsed = parseWorkspace(saved);
-      if (parsed) return parsed;
+      if (parsed) {
+        const migrated = await migrateBundledWorkspace(parsed);
+        if (migrated !== parsed) {
+          try {
+            await invoke("save_workspace", { workspace: migrated });
+          } catch (error) {
+            recordDiagnostic("项目迁移回写", error);
+          }
+        }
+        return migrated;
+      }
     } catch {
       // Browser storage remains a recovery path if desktop persistence is unavailable.
     }
@@ -195,7 +241,10 @@ export async function loadWorkspace(projectId?: string): Promise<Workspace | nul
 
   const workspaces = readBrowserLibrary();
   const activeProjectId = projectId ?? localStorage.getItem(ACTIVE_PROJECT_KEY);
-  return workspaces.find((item) => item.project.id === activeProjectId) ?? workspaces[0] ?? null;
+  const workspace = workspaces.find((item) => item.project.id === activeProjectId) ?? workspaces[0] ?? null;
+  const migrated = await migrateBundledWorkspace(workspace);
+  if (migrated !== workspace && migrated) writeBrowserLibrary(workspaces.map((item) => item === workspace ? migrated : item));
+  return migrated;
 }
 
 export async function saveWorkspace(workspace: Workspace): Promise<void> {
@@ -233,7 +282,11 @@ export async function clearRuntimeSession(projectId: string): Promise<void> {
 }
 
 export async function configureReadonlyProxy(projectId: string, connector: PresentationConnector, pageUrl: string): Promise<string> {
-  if (!inTauri()) throw new Error("只读代理仅在 Showit 桌面客户端中可用。");
+  if (!inTauri()) {
+    const proxyUrl = resolveBrowserReadonlyProxyUrl(connector, pageUrl, window.location.origin, import.meta.env.DEV);
+    if (proxyUrl) return proxyUrl;
+    throw new Error("浏览器开发模式仅支持已配置的本机只读代理；请使用 Showit 桌面客户端连接其他业务系统。");
+  }
   const target = await invoke<ReadonlyProxyTarget>("configure_readonly_proxy", {
     projectId,
     origin: connector.origin,
@@ -348,7 +401,9 @@ export async function openAudienceWindow(sessionId: string): Promise<void> {
     return;
   }
   const route = `${window.location.origin}${window.location.pathname}#/audience/${sessionId}`;
-  window.open(route, "showit-audience", "popup,width=1440,height=900");
+  if (!window.open(route, "showit-audience", "popup,width=1440,height=900")) {
+    throw new Error("观众屏窗口被浏览器拦截，请允许 Showit 打开弹出窗口后重试。");
+  }
 }
 
 export async function listAudienceNetworkInterfaces(): Promise<AudienceNetworkInterface[]> {

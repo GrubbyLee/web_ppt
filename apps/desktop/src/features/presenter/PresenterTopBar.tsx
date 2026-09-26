@@ -1,4 +1,4 @@
-import { CheckCircle2, DoorOpen, FolderOpen, MonitorUp, RefreshCw, Settings, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
+import { BookOpenText, CheckCircle2, DoorOpen, FolderOpen, MonitorUp, RefreshCw, Settings, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
 import type { PresentationSession, Project } from "@showit/contracts";
 import { ToolbarButton } from "../../components/ToolbarButton";
 import { formatClock, formatDuration, plannedEndTime, screenModeLabel, timerStatusLabel } from "../../lib/format";
@@ -12,6 +12,8 @@ type PresenterTopBarProps = {
   onOpenSettings: () => void;
   onOpenAudience: () => void;
   onApplyProjectChanges: () => void;
+  prompterOpen: boolean;
+  onTogglePrompter: () => void;
   onEnd: () => void;
 };
 
@@ -24,6 +26,8 @@ export function PresenterTopBar({
   onOpenSettings,
   onOpenAudience,
   onApplyProjectChanges,
+  prompterOpen,
+  onTogglePrompter,
   onEnd
 }: PresenterTopBarProps) {
   const page = project.pages[session.currentPageIndex] ?? project.pages[0];
@@ -56,6 +60,7 @@ export function PresenterTopBar({
         />
         <ToolbarButton icon={<ShieldCheck size={16} />} label="演前检查" title="查看演前检查" onClick={onOpenSettings} />
         <ToolbarButton icon={<RefreshCw size={16} />} label="应用修改" title="将项目编辑器的最新修改应用到当前演示" onClick={onApplyProjectChanges} />
+        <ToolbarButton icon={<BookOpenText size={16} />} label="提词" title="切换提词模式（P）" active={prompterOpen} onClick={onTogglePrompter} />
         <ToolbarButton icon={<Settings size={16} />} label="设置" title="打开设置" onClick={onOpenSettings} />
         <ToolbarButton icon={<MonitorUp size={16} />} label="观众屏" title="重新打开本机观众屏" onClick={onOpenAudience} />
         <ToolbarButton icon={<DoorOpen size={16} />} label="退出" title="退出演示" variant="danger" onClick={onEnd} />

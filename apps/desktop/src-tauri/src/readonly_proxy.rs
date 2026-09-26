@@ -316,6 +316,39 @@ fn rewrite_origin(value: &HeaderValue, target_origin: &str, proxy_origin: &str) 
         .unwrap_or_else(|| value.clone())
 }
 
+fn rewrite_content_security_policy(
+    value: &HeaderValue,
+    target_origin: &str,
+    proxy_origin: &str,
+) -> Option<HeaderValue> {
+    let value = value.to_str().ok()?;
+    let rewritten = value
+        .split(';')
+        .map(str::trim)
+        .filter(|directive| {
+            !directive
+                .split_ascii_whitespace()
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case("frame-ancestors"))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+        .replace(target_origin, proxy_origin);
+    HeaderValue::from_str(&rewritten).ok()
+}
+
+fn showit_client_origin(value: &HeaderValue) -> Option<HeaderValue> {
+    matches!(
+        value.to_str().ok()?,
+        "tauri://localhost"
+            | "http://tauri.localhost"
+            | "https://tauri.localhost"
+            | "http://localhost:4173"
+            | "http://127.0.0.1:4173"
+    )
+    .then(|| value.clone())
+}
+
 async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Request) -> Response {
     let Some(config) = service.config.read().await.clone() else {
         return error_response(
@@ -324,6 +357,10 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
         );
     };
     let (parts, body) = request.into_parts();
+    let client_origin = parts
+        .headers
+        .get(header::ORIGIN)
+        .and_then(showit_client_origin);
     if !write_allowed(&parts.method, parts.uri.path(), &config.allowed_write_paths) {
         return error_response(StatusCode::FORBIDDEN, "SHOWIT_PRESENTATION_READ_ONLY");
     }
@@ -418,7 +455,16 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
         if !should_forward_header(name) {
             continue;
         }
-        if name == header::SET_COOKIE {
+        if name == header::X_FRAME_OPTIONS {
+            continue;
+        }
+        if name == header::CONTENT_SECURITY_POLICY {
+            if let Some(policy) =
+                rewrite_content_security_policy(value, &config.target_origin, &proxy_origin)
+            {
+                response_headers.append(name, policy);
+            }
+        } else if name == header::SET_COOKIE {
             if let Some(cookie) = rewrite_set_cookie(value) {
                 response_headers.append(name, cookie);
             }
@@ -429,6 +475,17 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
             );
         }
     }
+    // The presenter checks session state from its own Tauri/Vite origin while the
+    // business iframe is served from this loopback origin. Only reflect known
+    // Showit origins, and require explicit credential support for that probe.
+    if let Some(origin) = client_origin {
+        response_headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+        response_headers.insert(
+            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+            HeaderValue::from_static("true"),
+        );
+        response_headers.insert(header::VARY, HeaderValue::from_static("Origin"));
+    }
     let mut response = Response::new(Body::from(bytes));
     *response.status_mut() = status;
     *response.headers_mut() = response_headers;
@@ -437,8 +494,11 @@ async fn proxy_request(State(service): State<ReadonlyProxyService>, request: Req
 
 #[cfg(test)]
 mod tests {
-    use super::{allowed_url, safe_path, write_allowed, ConnectorHeader, ReadonlyProxyService};
-    use axum::http::{Method, StatusCode};
+    use super::{
+        allowed_url, rewrite_content_security_policy, safe_path, showit_client_origin,
+        write_allowed, ConnectorHeader, ReadonlyProxyService,
+    };
+    use axum::http::{HeaderValue, Method, StatusCode};
     use std::{
         io::{Read, Write},
         net::{Ipv4Addr, TcpListener},
@@ -446,6 +506,46 @@ mod tests {
         thread,
         time::Duration,
     };
+
+    #[test]
+    fn allows_only_known_showit_origins() {
+        for origin in [
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+        ] {
+            assert_eq!(
+                showit_client_origin(&HeaderValue::from_static(origin)).unwrap(),
+                origin
+            );
+        }
+        for origin in [
+            "https://tauri.localhost.evil.example",
+            "http://localhost:4174",
+            "https://attacker.example",
+            "null",
+        ] {
+            assert!(showit_client_origin(&HeaderValue::from_static(origin)).is_none());
+        }
+    }
+
+    #[test]
+    fn removes_upstream_frame_ancestors_while_preserving_other_csp_directives() {
+        let value = HeaderValue::from_static(
+            "default-src 'self'; frame-ancestors 'self' https://host.example; connect-src https://host.example",
+        );
+        assert_eq!(
+            rewrite_content_security_policy(
+                &value,
+                "https://host.example",
+                "http://127.0.0.1:4567"
+            )
+            .unwrap(),
+            "default-src 'self'; connect-src http://127.0.0.1:4567"
+        );
+    }
 
     #[test]
     fn blocks_writes_except_explicit_auth_paths() {
@@ -543,6 +643,7 @@ mod tests {
             let client = reqwest::Client::new();
             let response = client
                 .get(&target.url)
+                .header("Origin", "tauri://localhost")
                 .header("Forwarded", "host=client-spoof.example")
                 .header("X-Forwarded-Host", "client-spoof.example")
                 .send()
@@ -558,7 +659,14 @@ mod tests {
                     .headers()
                     .get("access-control-allow-origin")
                     .unwrap(),
-                proxy_origin.as_str()
+                "tauri://localhost"
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("access-control-allow-credentials")
+                    .unwrap(),
+                "true"
             );
             assert_eq!(
                 response.headers().get("content-security-policy").unwrap(),

@@ -193,19 +193,22 @@ async function configureRequestProtection(message) {
   sendNative({ type: "request-protection-state", sessionId, enabled: true, origin, allowedPaths: allowedPaths.length });
 }
 
-async function probeActiveTab(sessionId) {
+async function probeActiveTab(sessionId, connectorIdValue, originValue) {
   activeSessionId = sessionId;
+  const connectorId = typeof connectorIdValue === "string" ? connectorIdValue.slice(0, 120) : "";
+  const expectedOrigin = typeof originValue === "string" && isAllowedOrigin(originValue) ? new URL(originValue).origin : "";
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab?.id || !tab.url) {
-    sendNative({ type: "connector-probe", sessionId, state: "error", reason: "未找到活动业务标签。" });
+    sendNative({ type: "connector-probe", sessionId, connectorId, origin: expectedOrigin, state: "error", reason: "未找到活动业务标签。" });
     return;
   }
   try {
     const result = await chrome.tabs.sendMessage(tab.id, { type: "showit-probe" });
-    if (!result || !isAllowedOrigin(result.origin)) throw new Error("业务标签未授权或未加载连接器。");
+    if (!result || !isAllowedOrigin(result.origin) || (expectedOrigin && new URL(result.origin).origin !== expectedOrigin)) throw new Error("活动业务标签与当前连接器不匹配。");
     sendNative({
       type: "connector-probe",
       sessionId,
+      connectorId,
       origin: result.origin,
       title: typeof result.title === "string" ? result.title.slice(0, 300) : "",
       hasPasswordField: result.hasPasswordField === true,
@@ -213,7 +216,7 @@ async function probeActiveTab(sessionId) {
     });
   } catch (error) {
     recordExtensionDiagnostic("探测活动业务标签", error);
-    sendNative({ type: "connector-probe", sessionId, state: "blocked", reason: error instanceof Error ? error.message.slice(0, 200) : "业务标签探测失败。" });
+    sendNative({ type: "connector-probe", sessionId, connectorId, origin: expectedOrigin, state: "blocked", reason: error instanceof Error ? error.message.slice(0, 200) : "业务标签探测失败。" });
   }
 }
 
@@ -227,7 +230,7 @@ async function ensureHost() {
     nativePort = chrome.runtime.connectNative(HOST_NAME);
     nativePort.onMessage.addListener((message) => {
       if (message?.type === "probe-active-tab" && typeof message.sessionId === "string") {
-        void probeActiveTab(message.sessionId);
+        void probeActiveTab(message.sessionId, message.connectorId, message.origin);
       }
       if (message?.type === "configure-request-protection") {
         void configureRequestProtection(message).catch((error) => {

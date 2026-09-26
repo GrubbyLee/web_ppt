@@ -15,6 +15,27 @@ type SeedPage = {
   steps?: Array<{ say: string; action?: string; expected?: string }>;
 };
 
+const referenceViews: Record<string, string> = {
+  cover: "overview",
+  "agenda-role-map": "overview",
+  "product-positioning": "admin",
+  "cross-role-lifecycle": "overview",
+  "visitor-chapter": "portal",
+  "visitor-live-demo": "marketplace",
+  "consumer-chapter": "applications",
+  "consumer-live-demo": "subscriptions",
+  "producer-chapter": "studio",
+  "capability-types": "studio-details",
+  "producer-live-demo": "registry",
+  "operator-chapter": "overview",
+  "operator-approval-demo": "approvals",
+  "operator-runtime-demo": "operations",
+  "administrator-chapter": "admin",
+  "administrator-live-demo": "admin-controls",
+  "architecture-boundary": "admin",
+  closing: "overview"
+};
+
 const seedPages: SeedPage[] = [
   {
     id: "cover",
@@ -389,7 +410,7 @@ function createPage(page: SeedPage, order: number): PresentationPage {
   return {
     id: page.id,
     order,
-    pageType: page.id === "closing" ? "end" : "business",
+    pageType: "business",
     enabled: true,
     title: page.title,
     section: page.section,
@@ -399,7 +420,7 @@ function createPage(page: SeedPage, order: number): PresentationPage {
     errorHandling: page.fallback,
     role: page.role,
     businessLabel: page.businessLabel,
-    url: `http://localhost:3000/docs/demo/lc-apim-customer-demo/index.html?mode=presenter&showitPage=${page.id}`,
+    url: `http://localhost:3001/console/?view=${referenceViews[page.id] ?? "overview"}`,
     connectorId: "lc-apim-local",
     variables: [],
     privacyMasks: [],
@@ -446,21 +467,76 @@ export const sampleProject: Project = {
     {
       id: "lc-apim-local",
       name: "LCAPIM 本机只读连接器",
-      origin: "http://localhost:3000",
-      mode: "extension",
+      origin: "http://localhost:3001",
+      mode: "iframe",
       permission: "assist",
       securityMode: "readonly-proxy",
       environment: "本机黄金样例",
       requestHeaders: [],
       basicAuthInstructions: "如需登录，请在业务浏览器中完成本机账号登录。",
-      loginPaths: ["/login", "/sso"],
-      logoutPaths: ["/logout"],
+      loginPaths: ["/api/lc/v1/auth/login"],
+      logoutPaths: ["/api/lc/v1/session/logout"],
+      sessionProbe: {
+        path: "/api/lc/v1/session/status",
+        userPath: ["data", "user"],
+        primaryRoleField: "role",
+        rolesField: "roles",
+        roleMappings: [
+          { presentationRole: "访客", connectorRole: "guest" },
+          { presentationRole: "能力使用者", connectorRole: "consumer" },
+          { presentationRole: "能力录入者", connectorRole: "producer" },
+          { presentationRole: "能力运营者", connectorRole: "operator" },
+          { presentationRole: "系统管理员", connectorRole: "admin" }
+        ]
+      },
       sandboxPermissions: ["allow-scripts", "allow-same-origin"],
-      allowedOrigins: ["http://localhost:3000"]
+      allowedOrigins: ["http://localhost:3001"]
     }
   ],
   pages: seedPages.map(createPage)
 };
+
+const legacySampleProject: Project = {
+  ...sampleProject,
+  connectors: sampleProject.connectors.map((connector) => connector.id === "lc-apim-local" ? {
+    ...connector,
+    origin: "http://localhost:3000",
+    mode: "extension" as const,
+    allowedOrigins: ["http://localhost:3000"],
+    loginPaths: ["/login", "/sso"],
+    logoutPaths: ["/logout"],
+    sessionProbe: undefined
+  } : connector),
+  pages: sampleProject.pages.map((page) => ({
+    ...page,
+    pageType: page.id === "closing" ? "end" : "business",
+    url: `http://localhost:3000/docs/demo/lc-apim-customer-demo/index.html?mode=presenter&showitPage=${page.id}`
+  }))
+};
+
+const priorBundledSampleProject: Project = {
+  ...sampleProject,
+  connectors: sampleProject.connectors.map((connector) => connector.id === "lc-apim-local"
+    ? { ...connector, sessionProbe: undefined }
+    : connector)
+};
+
+/** Only replace the exact bundled v1 sample; user changes are intentionally preserved. */
+export function migrateLegacyBundledSample(project: Project): Project | null {
+  const stableValue = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stableValue);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, stableValue(item)]));
+  };
+  const serialized = JSON.stringify(stableValue(project));
+  const isUntouchedBundledProject = serialized === JSON.stringify(stableValue(legacySampleProject))
+    || serialized === JSON.stringify(stableValue(priorBundledSampleProject));
+  if (project.id !== sampleProject.id || !isUntouchedBundledProject) return null;
+  return structuredClone(sampleProject);
+}
 
 export const sampleSession: PresentationSession = {
   id: "session-lc-apim-local",

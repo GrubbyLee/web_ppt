@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Circle, LaserPoint, PresentationSession, PrivacyMask } from "@showit/contracts";
 
 type AnnotationLayerProps = {
@@ -11,7 +11,7 @@ type AnnotationLayerProps = {
   onMask?: (mask: PrivacyMask) => void;
 };
 
-function pointFromEvent(event: React.PointerEvent<SVGSVGElement>) {
+function pointFromEvent(event: React.PointerEvent<HTMLElement>) {
   const rect = event.currentTarget.getBoundingClientRect();
   return {
     x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
@@ -29,14 +29,50 @@ export function AnnotationLayer({
   onMask
 }: AnnotationLayerProps) {
   const [draft, setDraft] = useState<Circle | null>(null);
+  const lastLaserSentAt = useRef(0);
+  const pendingLaserPoint = useRef<{ x: number; y: number } | null>(null);
+  const laserTimer = useRef<number | null>(null);
   const activeCircles = useMemo(() => (draft ? [...circles, draft] : circles), [circles, draft]);
   const isInteractive = interactive && tool !== "none";
 
+  useEffect(() => () => {
+    if (laserTimer.current !== null) window.clearTimeout(laserTimer.current);
+  }, []);
+
+  const publishLaser = (point: { x: number; y: number }) => {
+    const send = (next: { x: number; y: number }) => {
+      lastLaserSentAt.current = Date.now();
+      onLaser?.({ ...next, expiresAt: Date.now() + 700 });
+    };
+
+    const elapsed = Date.now() - lastLaserSentAt.current;
+    if (elapsed >= 33) {
+      send(point);
+      return;
+    }
+
+    pendingLaserPoint.current = point;
+    if (laserTimer.current !== null) return;
+    laserTimer.current = window.setTimeout(() => {
+      laserTimer.current = null;
+      const next = pendingLaserPoint.current;
+      pendingLaserPoint.current = null;
+      if (next) send(next);
+    }, 33 - elapsed);
+  };
+
+  const clearLaser = () => {
+    pendingLaserPoint.current = null;
+    if (laserTimer.current !== null) {
+      window.clearTimeout(laserTimer.current);
+      laserTimer.current = null;
+    }
+    onLaser?.(null);
+  };
+
   return (
-    <svg
-      className={`annotation-layer ${isInteractive ? "is-interactive" : ""}`}
-      viewBox="0 0 1 1"
-      preserveAspectRatio="none"
+    <div
+      className={`annotation-layer ${isInteractive ? "is-interactive" : ""} ${tool === "laser" ? "is-laser" : ""}`}
       aria-hidden="true"
       onPointerDown={(event) => {
         if (!isInteractive || !["circle", "mask"].includes(tool)) return;
@@ -48,7 +84,7 @@ export function AnnotationLayer({
         if (!isInteractive) return;
         const point = pointFromEvent(event);
         if (tool === "laser") {
-          onLaser?.({ ...point, expiresAt: Date.now() + 700 });
+          publishLaser(point);
           return;
         }
         if ((tool === "circle" || tool === "mask") && draft) {
@@ -65,26 +101,28 @@ export function AnnotationLayer({
         else onCircle?.(next);
       }}
       onPointerLeave={() => {
-        if (tool === "laser") onLaser?.(null);
+        if (tool === "laser") clearLaser();
       }}
     >
-      {activeCircles.map((circle) => {
-        const x = Math.min(circle.x1, circle.x2);
-        const y = Math.min(circle.y1, circle.y2);
-        const width = Math.abs(circle.x2 - circle.x1);
-        const height = Math.abs(circle.y2 - circle.y1);
-        return (
-          tool === "mask" && circle === draft ? <rect key={circle.id} className="annotation-layer__mask-draft" x={x} y={y} width={width} height={height} vectorEffect="non-scaling-stroke" /> : <ellipse
-            key={circle.id}
-            cx={x + width / 2}
-            cy={y + height / 2}
-            rx={width / 2}
-            ry={height / 2}
-            vectorEffect="non-scaling-stroke"
-          />
-        );
-      })}
-      {laser ? <circle className="annotation-layer__laser" cx={laser.x} cy={laser.y} r={0.015} /> : null}
-    </svg>
+      <svg className="annotation-layer__ink" viewBox="0 0 1 1" preserveAspectRatio="none">
+        {activeCircles.map((circle) => {
+          const x = Math.min(circle.x1, circle.x2);
+          const y = Math.min(circle.y1, circle.y2);
+          const width = Math.abs(circle.x2 - circle.x1);
+          const height = Math.abs(circle.y2 - circle.y1);
+          return (
+            tool === "mask" && circle === draft ? <rect key={circle.id} className="annotation-layer__mask-draft" x={x} y={y} width={width} height={height} vectorEffect="non-scaling-stroke" /> : <ellipse
+              key={circle.id}
+              cx={x + width / 2}
+              cy={y + height / 2}
+              rx={width / 2}
+              ry={height / 2}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+      </svg>
+      {laser ? <span className="annotation-layer__laser" style={{ left: `${laser.x * 100}%`, top: `${laser.y * 100}%` }} /> : null}
+    </div>
   );
 }

@@ -75,6 +75,17 @@ export function runProjectPreflight(project: Project): PreflightReport {
   }
 
   const pageIds = new Set<string>();
+  const connectorRoleMappings = new Map<string, Set<string>>();
+  for (const connector of project.connectors) {
+    const probe = connector.sessionProbe;
+    if (!probe) continue;
+    const presentationRoles = probe.roleMappings.map((mapping) => mapping.presentationRole);
+    const duplicates = presentationRoles.filter((role, index) => presentationRoles.indexOf(role) !== index);
+    if (duplicates.length > 0) {
+      items.push({ id: `session-role-mapping-${connector.id}`, state: "error", message: `连接器“${connector.name}”的演示角色映射重复：${[...new Set(duplicates)].join("、")}。` });
+    }
+    connectorRoleMappings.set(connector.id, new Set(presentationRoles));
+  }
   if (!project.pages.some((page) => page.enabled)) {
     items.push({ id: "pages-enabled", state: "error", message: "项目至少需要启用一个演示页面。" });
   }
@@ -131,6 +142,9 @@ export function runProjectPreflight(project: Project): PreflightReport {
     const connector = page.connectorId ? project.connectors.find((candidate) => candidate.id === page.connectorId) : undefined;
     if (page.connectorId && !connector) {
       items.push({ id: `connector-${page.id}`, state: "error", pageId: page.id, message: `${page.title}：引用的连接器不存在。` });
+    }
+    if (connector?.sessionProbe && connector.sessionProbe.roleMappings.length > 0 && !connectorRoleMappings.get(connector.id)?.has(page.role)) {
+      items.push({ id: `session-role-${page.id}`, state: "warn", pageId: page.id, message: `${page.title}：连接器已启用角色检查，但未配置“${page.role}”的业务角色映射；本页只检查登录状态。` });
     }
 
     if (!page.url) {

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Circle, PresentationSession, PrivacyMask, Project, ProjectLayout, Rehearsal, ScreenMode } from "@showit/contracts";
-import { sampleProject, sampleSession } from "../lib/sample-project";
+import { createProject, createSession } from "../lib/project-workspace";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -108,9 +108,12 @@ export function autoAdvanceElapsedMs(session: PresentationSession, now = Date.no
   return session.autoAdvanceElapsedMs + Math.max(0, now - session.autoAdvanceStartedAt);
 }
 
+const initialProject = createProject("未命名演示");
+const initialSession = createSession(initialProject);
+
 export const usePresentationStore = create<PresentationStore>((set) => ({
-  project: sampleProject,
-  session: sampleSession,
+  project: initialProject,
+  session: initialSession,
   hydrated: false,
   saveState: "idle",
   lastSavedAt: null,

@@ -14,7 +14,7 @@ const router = createHashRouter([
   { path: "/", element: <Navigate to="/projects" replace /> },
   { path: "/projects", element: <LazyRoute><ProjectWorkspace /></LazyRoute> },
   { path: "/projects/:projectId/edit", element: <LazyRoute><ProjectEditor /></LazyRoute> },
-  { path: "/presenter", element: <LazyRoute><PresenterShell /></LazyRoute> },
+  { path: "/presenter", element: <Navigate to="/projects" replace /> },
   { path: "/presenter/:projectId", element: <LazyRoute><PresenterShell /></LazyRoute> },
   { path: "/audience/:sessionId", element: <LazyRoute><AudienceWindow /></LazyRoute> }
 ]);

@@ -74,6 +74,23 @@ const connectorPath = z
   .max(500)
   .refine(isAllowedConnectorPath, "放行路径必须是以单个 / 开头且不含查询、Hash 或路径穿越的绝对路径。");
 
+const sessionProbeField = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[a-zA-Z][a-zA-Z0-9_]*$/, "会话字段名只能使用字母、数字和下划线。");
+
+const ConnectorSessionProbeSchema = z.object({
+  path: connectorPath,
+  userPath: z.array(sessionProbeField).min(1).max(6).default(["data", "user"]),
+  primaryRoleField: sessionProbeField.default("role"),
+  rolesField: sessionProbeField.default("roles"),
+  roleMappings: z.array(z.object({
+    presentationRole: z.string().trim().min(1).max(80),
+    connectorRole: z.string().trim().min(1).max(80)
+  }).strict()).max(30).default([])
+}).strict();
+
 const connectorHeaderName = z
   .string()
   .min(1)
@@ -282,6 +299,7 @@ export const PresentationConnectorSchema = z.object({
   basicAuthInstructions: z.string().max(1_000).default(""),
   loginPaths: z.array(connectorPath).max(20).default([]),
   logoutPaths: z.array(connectorPath).max(20).default([]),
+  sessionProbe: ConnectorSessionProbeSchema.optional(),
   sandboxPermissions: z.array(z.enum(["allow-scripts", "allow-same-origin", "allow-forms"])).max(3),
   allowedOrigins: z.array(businessUrl).min(1).max(20)
 });
