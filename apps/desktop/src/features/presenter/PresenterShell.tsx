@@ -3,7 +3,7 @@ import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Input, Modal } from "antd";
 import { createAudienceChannel, laserOnlyChange, publishLaser, publishSnapshot } from "../../lib/audience-sync";
-import { clearReadonlyProxy, decideAudienceViewer, disconnectAllAudienceViewers, disconnectAudienceViewer, focusMainWindow, getAudienceSessionStatus, listAudienceNetworkInterfaces, listenAudienceWindowClosed, listenExtensionMessages, loadRuntimeSession, openAudienceWindow, loadWorkspace, publishAudienceSession, saveRuntimeSession, sendExtensionMessage, startAudienceSession, stopAudienceSession, type AudienceNetworkInterface, type AudienceSessionStatus, type AudienceShare } from "../../lib/persistence";
+import { clearReadonlyProxy, decideAudienceViewer, disconnectAllAudienceViewers, disconnectAudienceViewer, focusMainWindow, getAudienceSessionStatus, inTauri, listAudienceNetworkInterfaces, listenAudienceWindowClosed, listenExtensionMessages, loadRuntimeSession, openAudienceWindow, loadWorkspace, publishAudienceSession, saveRuntimeSession, sendExtensionMessage, startAudienceSession, stopAudienceSession, type AudienceNetworkInterface, type AudienceSessionStatus, type AudienceShare } from "../../lib/persistence";
 import { listRehearsals, saveRehearsal } from "../../lib/persistence";
 import { autoAdvanceElapsedMs, usePresentationStore } from "../../stores/presentation-store";
 import { canAutoContinueAfterVerification } from "../../lib/step-runtime";
@@ -19,6 +19,7 @@ import { applyProjectToPresentation, beginPresentationLaunch, loadPresentationLa
 import { resolveRecordedAction } from "../../lib/step-action";
 import { shutdownPresentationRuntime } from "../../lib/presentation-shutdown";
 import { inspectProjectImport, projectTrustState, trustProject } from "../../lib/project-trust";
+import { hasPresenterEdits, mergePresenterEditsIntoWorkspace } from "../../lib/presenter-edits";
 import { startExtensionProbe, type ExtensionProbeState } from "../../lib/connector-probe";
 
 const SettingsDrawer = lazy(() => import("./SettingsDrawer").then((module) => ({ default: module.SettingsDrawer })));
@@ -74,9 +75,11 @@ export function PresenterShell() {
   const now = useClock();
   const narrow = useNarrowLayout();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPreflightFocus, setSettingsPreflightFocus] = useState(false);
   const [prompterOpen, setPrompterOpen] = useState(false);
   const [rehearsals, setRehearsals] = useState<Rehearsal[]>([]);
   const [audienceShare, setAudienceShare] = useState<AudienceShare | null>(null);
+  const [audienceError, setAudienceError] = useState<string | null>(null);
   const [audienceSessionStatus, setAudienceSessionStatus] = useState<AudienceSessionStatus | null>(null);
   const [audienceNetworkInterfaces, setAudienceNetworkInterfaces] = useState<AudienceNetworkInterface[]>([]);
   const [audienceNetworkAddress, setAudienceNetworkAddress] = useState("");
@@ -92,6 +95,8 @@ export function PresenterShell() {
   const [secretPromptOpen, setSecretPromptOpen] = useState(false);
   const [trustBlocked, setTrustBlocked] = useState(false);
   const [offlineOriginRequest, setOfflineOriginRequest] = useState<string | null>(null);
+  const [rehearsalNoteOpen, setRehearsalNoteOpen] = useState(false);
+  const [rehearsalNote, setRehearsalNote] = useState("");
   const {
     project,
     session,
@@ -99,6 +104,7 @@ export function PresenterShell() {
     saveState,
     lastSavedAt,
     rehearsalStartedAt,
+    localAudience,
     setWorkspace,
     setSaveState,
     setStagePercent,
@@ -135,7 +141,8 @@ export function PresenterShell() {
     clearPrivacyMasks,
     audienceReady,
     setAudienceCount,
-    audienceDisconnected
+    audienceDisconnected,
+    localAudienceClosed
   } = usePresentationStore();
   const page = project.pages[session.currentPageIndex] ?? project.pages[0];
   const pendingHighRiskStep = page?.script.steps.find((step) => step.id === session.pendingHighRiskStepId) ?? null;
@@ -241,13 +248,20 @@ export function PresenterShell() {
       startRehearsal();
       return;
     }
-    const record = finishRehearsal();
+    // Finishing asks for an optional note first (requirement 4.7 排练备注);
+    // the actual save happens in the modal's onOk.
+    setRehearsalNote("");
+    setRehearsalNoteOpen(true);
+  }, [startRehearsal]);
+
+  const saveFinishedRehearsal = useCallback((note: string) => {
+    const record = finishRehearsal(note);
     if (!record) return;
     saveRehearsal(record)
       .then(() => listRehearsals(project.id))
       .then(setRehearsals)
       .catch((error) => { recordDiagnostic("保存排练记录", error); setSaveState("error"); });
-  }, [finishRehearsal, project.id, setSaveState, startRehearsal]);
+  }, [finishRehearsal, project.id, setSaveState]);
 
   useEffect(() => {
     pendingStepOperations.current.clear();
@@ -329,7 +343,9 @@ export function PresenterShell() {
       origin: "",
       securityMode: "interactive",
       loginPaths: [],
-      logoutPaths: []
+      logoutPaths: [],
+      roleSwitchPaths: [],
+      allowedOrigins: []
     });
     void sendExtensionMessage({ type: "audience-share", sessionId: session.id, signalUrl: "", deliveryMode: "p2p", sfuUrl: "", sfuToken: "" });
   }, [project.id, session.id]);
@@ -621,7 +637,9 @@ export function PresenterShell() {
       origin: connector?.origin ?? "",
       securityMode: connector?.mode === "extension" && connector.securityMode === "request-protection" ? "request-protection" : "interactive",
       loginPaths: connector?.loginPaths ?? [],
-      logoutPaths: connector?.logoutPaths ?? []
+      logoutPaths: connector?.logoutPaths ?? [],
+      roleSwitchPaths: connector?.roleSwitchPaths ?? [],
+      allowedOrigins: connector?.allowedOrigins ?? []
     }).catch(() => undefined);
   }, [hydrated, page?.connectorId, project.connectors, session.id]);
 
@@ -635,7 +653,7 @@ export function PresenterShell() {
     if (!hydrated) return;
     let unlisten: (() => void) | null = null;
     let disposed = false;
-    listenAudienceWindowClosed(session.id, audienceDisconnected)
+    listenAudienceWindowClosed(session.id, localAudienceClosed)
       .then((cleanup) => {
         if (disposed) { cleanup?.(); return; }
         unlisten = cleanup;
@@ -645,7 +663,7 @@ export function PresenterShell() {
       disposed = true;
       unlisten?.();
     };
-  }, [audienceDisconnected, hydrated, session.id]);
+  }, [hydrated, localAudienceClosed, session.id]);
 
   const autoAdvanceBlocked = !hydrated
     || !page
@@ -660,7 +678,8 @@ export function PresenterShell() {
     || pendingHighRiskStep !== null
     || forceCompletion !== null
     || stepExecution !== null
-    || secretPromptOpen;
+    || secretPromptOpen
+    || offlineOriginRequest !== null;
 
   useEffect(() => {
     setAutoAdvanceRunning(project.autoAdvanceEnabled && !autoAdvanceBlocked);
@@ -682,7 +701,8 @@ export function PresenterShell() {
     || maskPickerActive
     || pendingHighRiskStep !== null
     || forceCompletion !== null
-    || stepExecution !== null;
+    || stepExecution !== null
+    || rehearsalNoteOpen;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -725,7 +745,7 @@ export function PresenterShell() {
       if (event.key.toLowerCase() === "a") { event.preventDefault(); setAutoAdvance(!project.autoAdvanceEnabled); }
       if (event.key.toLowerCase() === "r") { event.preventDefault(); toggleRehearsal(); }
       if (event.key.toLowerCase() === "p") { event.preventDefault(); setPrompterOpen((open) => !open); }
-      if (event.key === "?" || event.key === "/") { event.preventDefault(); setSettingsOpen(true); }
+      if (event.key === "?" || event.key === "/") { event.preventDefault(); setSettingsPreflightFocus(false); setSettingsOpen(true); }
       if (event.key === "Escape") {
         event.preventDefault();
         if (session.screenMode !== "normal") setScreenMode("normal");
@@ -750,6 +770,10 @@ export function PresenterShell() {
     if (closing.current) return;
     closing.current = true;
     const current = usePresentationStore.getState();
+    // Live presenter edits (script, URL, masks, layout, auto-advance) are
+    // tracked separately; merge them into the project library before the
+    // runtime state is torn down, so exiting no longer destroys them.
+    const editScope = current.presenterEdits;
     current.endPresentation();
     const ended = usePresentationStore.getState();
     const failures = await shutdownPresentationRuntime({
@@ -758,6 +782,11 @@ export function PresenterShell() {
       audienceSessionId: audienceShare?.sessionId ?? null
     });
     for (const failure of failures) recordDiagnostic(failure.area, failure.error);
+    try {
+      await mergePresenterEditsIntoWorkspace(ended.project, editScope);
+    } catch (error) {
+      recordDiagnostic("合并演示期修改回项目", error);
+    }
     setAudienceShare(null);
     setAudienceSessionStatus(null);
     navigate("/projects");
@@ -812,9 +841,11 @@ export function PresenterShell() {
         project={project}
         session={session}
         now={now}
+        localAudience={localAudience}
         onToggleAutoAdvance={() => setAutoAdvance(!project.autoAdvanceEnabled)}
         onOpenProjects={() => { void closePresentation(); }}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => { setSettingsPreflightFocus(false); setSettingsOpen(true); }}
+        onOpenPreflight={() => { setSettingsPreflightFocus(true); setSettingsOpen(true); }}
         onApplyProjectChanges={() => {
           const current = usePresentationStore.getState();
           loadWorkspace(current.project.id)
@@ -826,21 +857,36 @@ export function PresenterShell() {
                 setWorkspace(applied.project, applied.session);
                 setConnectorState({ state: "ready", title: "已应用项目编辑器中的最新修改" });
               };
-              if (await projectTrustState(stored.project) === "trusted") {
-                apply();
+              const proceed = async () => {
+                if (await projectTrustState(stored.project) === "trusted") {
+                  apply();
+                  return;
+                }
+                const review = inspectProjectImport(stored.project);
+                Modal.confirm({
+                  title: "项目修改需要重新信任",
+                  content: `将应用 ${review.origins.length} 个业务域名、${review.offlineHtmlPages} 个离线 HTML 页面、${review.automatedConnectors} 个自动操作连接器和 ${review.highRiskSteps} 个高风险步骤。`,
+                  okText: "确认信任并应用",
+                  cancelText: "取消",
+                  onOk: async () => {
+                    await trustProject(stored.project);
+                    apply();
+                  }
+                });
+              };
+              // Applying adopts the editor version wholesale; live edits that
+              // have not been merged back yet would be silently discarded.
+              if (hasPresenterEdits(usePresentationStore.getState().presenterEdits)) {
+                Modal.confirm({
+                  title: "覆盖演示期修改",
+                  content: "演示期间存在尚未合并回项目的现场修改（脚本、业务地址、遮罩、布局或自动翻页）。应用编辑器修改后，这些现场修改将被编辑器版本覆盖。",
+                  okText: "仍然应用",
+                  cancelText: "取消",
+                  onOk: () => { void proceed(); }
+                });
                 return;
               }
-              const review = inspectProjectImport(stored.project);
-              Modal.confirm({
-                title: "项目修改需要重新信任",
-                content: `将应用 ${review.origins.length} 个业务域名、${review.offlineHtmlPages} 个离线 HTML 页面、${review.automatedConnectors} 个自动操作连接器和 ${review.highRiskSteps} 个高风险步骤。`,
-                okText: "确认信任并应用",
-                cancelText: "取消",
-                onOk: async () => {
-                  await trustProject(stored.project);
-                  apply();
-                }
-              });
+              await proceed();
             })
             .catch((error) => {
               recordDiagnostic("应用项目修改", error);
@@ -881,14 +927,14 @@ export function PresenterShell() {
           key={panelKey}
           orientation={narrow ? "vertical" : "horizontal"}
           defaultLayout={{
-            stage: narrow ? 62 : project.layout.stagePercent,
-            notes: narrow ? 38 : 100 - project.layout.stagePercent
+            stage: narrow ? 62 : Math.min(66, Math.max(50, project.layout.stagePercent)),
+            notes: narrow ? 38 : 100 - Math.min(66, Math.max(50, project.layout.stagePercent))
           }}
           onLayoutChanged={(layout: Layout) => {
             if (!narrow && typeof layout.stage === "number") setStagePercent(layout.stage);
           }}
         >
-          <Panel id="stage" className="stage-panel" minSize={narrow ? "45%" : "50%"} maxSize={narrow ? "70%" : "75%"}>
+          <Panel id="stage" className="stage-panel" minSize={narrow ? "45%" : "50%"} maxSize={narrow ? "70%" : "66%"}>
             <BusinessStage
               project={project}
               session={session}
@@ -1047,21 +1093,23 @@ export function PresenterShell() {
             }}
             onStartAudienceShare={() => {
               startAudienceSession(project, session, audienceNetworkAddress || undefined)
-                .then((share) => { setAudienceShare(share); setAudienceSessionStatus({ audienceCount: 0, capacity: share.deliveryMode === "sfu" ? 20 : 5, viewers: [] }); setAudienceCount(0); })
-                .catch((error) => { recordDiagnostic("启动局域网观众", error); setSaveState("error"); });
+                .then((share) => { setAudienceError(null); setAudienceShare(share); setAudienceSessionStatus({ audienceCount: 0, capacity: share.deliveryMode === "sfu" ? 20 : 5, viewers: [] }); setAudienceCount(0); })
+                .catch((error) => { recordDiagnostic("启动局域网观众", error); setAudienceError("局域网观众服务启动失败，请检查本机网络后重试。"); });
             }}
             onStopAudienceShare={() => {
               if (!audienceShare) return;
               stopAudienceSession(audienceShare.sessionId)
                 .then(() => {
                   void sendExtensionMessage({ type: "audience-share", sessionId: audienceShare.sessionId, signalUrl: "", deliveryMode: "p2p", sfuUrl: "", sfuToken: "" });
+                  setAudienceError(null);
                   setAudienceShare(null);
                   setAudienceSessionStatus(null);
                   audienceDisconnected();
                 })
-                .catch((error) => { recordDiagnostic("停止局域网观众", error); setSaveState("error"); });
+                .catch((error) => { recordDiagnostic("停止局域网观众", error); setAudienceError("局域网观众服务停止失败，观众可能仍在连接；可重启演示恢复。"); });
             }}
-            onClose={() => setSettingsOpen(false)}
+            onClose={() => { setSettingsOpen(false); setSettingsPreflightFocus(false); }}
+            scrollToPreflight={settingsPreflightFocus}
             onAutoAdvance={setAutoAdvance}
             onAutoAdvanceSeconds={setAutoAdvanceSeconds}
             onCurrentPageAutoAdvanceSeconds={setCurrentPageAutoAdvanceSeconds}
@@ -1124,10 +1172,42 @@ export function PresenterShell() {
         </div>
       </Modal>
 
-      <aside className="audience-link" aria-label="局域网观众链接">
-        <span>{audienceShare ? "局域网观众链接" : "本机观众链接"}</span>
-        <code>{audienceShare?.url ?? audienceUrl}</code>
-      </aside>
+      <Modal
+        title="结束排练"
+        open={rehearsalNoteOpen}
+        onCancel={() => setRehearsalNoteOpen(false)}
+        footer={[
+          <Button key="continue" onClick={() => setRehearsalNoteOpen(false)}>继续排练</Button>,
+          <Button key="save" type="primary" onClick={() => { setRehearsalNoteOpen(false); saveFinishedRehearsal(rehearsalNote); }}>保存排练记录</Button>
+        ]}
+      >
+        <label className="rehearsal-note-field">
+          <span>排练备注（可选）</span>
+          <Input.TextArea
+            value={rehearsalNote}
+            maxLength={2_000}
+            rows={3}
+            placeholder="例如：开场节奏偏慢，第二页演示需要精简"
+            onChange={(event) => setRehearsalNote(event.target.value)}
+          />
+        </label>
+      </Modal>
+
+      {audienceError ? (
+        <aside className="audience-error" role="alert">
+          <span>{audienceError}</span>
+          <button type="button" onClick={() => setAudienceError(null)}>知道了</button>
+        </aside>
+      ) : null}
+      {/* In the desktop client the tauri:// origin is not openable from a
+          browser, so the local link only makes sense in browser/dev runs;
+          desktop users open the local audience window from the top bar. */}
+      {audienceShare || !inTauri() ? (
+        <aside className="audience-link" aria-label="局域网观众链接">
+          <span>{audienceShare ? "局域网观众链接" : "本机观众链接"}</span>
+          <code>{audienceShare?.url ?? audienceUrl}</code>
+        </aside>
+      ) : null}
     </main>
   );
 }

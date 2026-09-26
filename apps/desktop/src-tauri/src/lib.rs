@@ -23,6 +23,25 @@ struct UrlHealth {
     status: Option<u16>,
     elapsed_ms: u64,
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+}
+
+/// Best-effort `<title>` extraction from the head of an HTML document, so the
+/// pre-show health check can confirm the right business page answered. The
+/// browser cannot read cross-origin bodies, which is why this lives here.
+fn extract_html_title(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let lower = text.to_ascii_lowercase();
+    let start = lower.find("<title")?;
+    let open_end = lower[start..].find('>')? + start + 1;
+    let end = lower[open_end..].find("</title")? + open_end;
+    let cleaned = text[open_end..end].split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned.chars().take(200).collect())
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -715,6 +734,7 @@ async fn configure_readonly_proxy(
     page_url: String,
     login_paths: Vec<String>,
     logout_paths: Vec<String>,
+    role_switch_paths: Vec<String>,
     request_headers: Vec<ConnectorHeader>,
 ) -> Result<ReadonlyProxyTarget, String> {
     if !is_safe_identifier(&project_id) {
@@ -725,7 +745,11 @@ async fn configure_readonly_proxy(
             project_id,
             origin,
             page_url,
-            login_paths.into_iter().chain(logout_paths).collect(),
+            login_paths
+                .into_iter()
+                .chain(logout_paths)
+                .chain(role_switch_paths)
+                .collect(),
             request_headers,
         )
         .await
@@ -867,6 +891,7 @@ fn publish_project_version(
     project: Value,
     change_summary: String,
     kind: Option<String>,
+    published_by: Option<String>,
 ) -> Result<Value, String> {
     let connection = open_database(&app)?;
     let project_id = project
@@ -892,6 +917,7 @@ fn publish_project_version(
         "version": next_version,
         "kind": kind,
         "createdAt": created_at,
+        "publishedBy": published_by.unwrap_or_default(),
         "changeSummary": change_summary,
         "snapshot": project
     });
@@ -1071,6 +1097,7 @@ async fn check_business_url(url: String) -> UrlHealth {
             status: None,
             elapsed_ms: 0,
             error: Some("业务 URL 不在允许范围内".to_string()),
+            title: None,
         };
     }
     let client = match reqwest::Client::builder()
@@ -1086,17 +1113,35 @@ async fn check_business_url(url: String) -> UrlHealth {
                 status: None,
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 error: Some("健康检查客户端无法初始化".to_string()),
+                title: None,
             }
         }
     };
     match client.get(url).send().await {
-        Ok(response) => {
+        Ok(mut response) => {
             let status = response.status().as_u16();
+            let is_html = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"));
+            let mut title = None;
+            if is_html {
+                let mut head: Vec<u8> = Vec::new();
+                while let Ok(Some(chunk)) = response.chunk().await {
+                    head.extend_from_slice(&chunk);
+                    if head.len() >= 65_536 {
+                        break;
+                    }
+                }
+                title = extract_html_title(&head);
+            }
             UrlHealth {
-                ok: response.status().is_success(),
+                ok: (200..300).contains(&status),
                 status: Some(status),
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 error: None,
+                title,
             }
         }
         Err(error) => UrlHealth {
@@ -1108,6 +1153,7 @@ async fn check_business_url(url: String) -> UrlHealth {
             } else {
                 "业务页面无法连接".to_string()
             }),
+            title: None,
         },
     }
 }
@@ -1244,11 +1290,23 @@ mod readonly_proxy;
 
 #[cfg(test)]
 mod url_tests {
+    use super::extract_html_title;
     use super::is_allowed_business_url;
     use super::is_safe_identifier;
     use super::redact_native_diagnostic;
     use super::{secondary_monitor_index, MonitorFingerprint};
     use std::path::Path;
+
+    #[test]
+    fn extracts_html_titles_from_health_check_bodies() {
+        assert_eq!(
+            extract_html_title(b"<html><head><title>  Customer\n  Console </title></head>"),
+            Some("Customer Console".to_string())
+        );
+        assert_eq!(extract_html_title(b"<TITLE>LCAPIM</TITLE>"), Some("LCAPIM".to_string()));
+        assert_eq!(extract_html_title(b"<title></title>"), None);
+        assert_eq!(extract_html_title(b"<div>no title</div>"), None);
+    }
 
     #[test]
     fn limits_business_health_check_urls() {

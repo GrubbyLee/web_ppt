@@ -22,6 +22,10 @@ async function selectPage(index) {
 }
 
 try {
+  // Seed the bundled sample into the (fresh) browser library first — a direct
+  // presenter URL on an empty store bounces back to the project library.
+  await page.goto(`${appUrl}/#/projects`);
+  await page.waitForLoadState("networkidle");
   await page.goto(`${appUrl}/#/presenter/lc-apim-five-role-demo`);
   await page.waitForLoadState("networkidle");
   const directoryResponse = await context.request.get(`${appUrl}/api/lc/v1/demo/accounts`);

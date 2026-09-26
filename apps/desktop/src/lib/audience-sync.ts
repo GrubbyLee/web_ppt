@@ -88,7 +88,16 @@ export function createAudienceEventGuard(sessionId: string): (event: AudienceEve
     if (event.sessionId !== sessionId || seenNonces.has(event.nonce)) return false;
     seenNonces.add(event.nonce);
     if (seenNonces.size > 256) seenNonces.delete(seenNonces.values().next().value!);
+    if (event.type === "bye") {
+      // The run is over; the next snapshots belong to a fresh presenter that
+      // counts its sequence from zero again.
+      lastSequence = -1;
+    }
     if (event.type === "snapshot" || event.type === "laser") {
+      // A restarted presenter (including crash recovery, which sends no bye)
+      // also resumes from a low sequence: a large backwards jump is a new
+      // run, while within-run reordering only ever shuffles by a little.
+      if (lastSequence - event.seq >= 64) lastSequence = -1;
       if (event.seq <= lastSequence) return false;
       lastSequence = event.seq;
     }

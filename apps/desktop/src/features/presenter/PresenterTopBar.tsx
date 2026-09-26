@@ -7,9 +7,11 @@ type PresenterTopBarProps = {
   project: Project;
   session: PresentationSession;
   now: number;
+  localAudience: boolean;
   onToggleAutoAdvance: () => void;
   onOpenProjects: () => void;
   onOpenSettings: () => void;
+  onOpenPreflight: () => void;
   onOpenAudience: () => void;
   onApplyProjectChanges: () => void;
   prompterOpen: boolean;
@@ -21,9 +23,11 @@ export function PresenterTopBar({
   project,
   session,
   now,
+  localAudience,
   onToggleAutoAdvance,
   onOpenProjects,
   onOpenSettings,
+  onOpenPreflight,
   onOpenAudience,
   onApplyProjectChanges,
   prompterOpen,
@@ -39,7 +43,7 @@ export function PresenterTopBar({
         <span>{project.name}</span>
       </section>
       <section className="signal-rail" aria-label="演示信号状态">
-        <span data-state={session.audienceStatus}>观众屏 {session.audienceStatus === "synced" ? `${session.audienceCount} 人` : "未连接"}</span>
+        <span data-state={session.audienceStatus}>观众屏 {session.audienceStatus === "synced" ? (localAudience ? (session.audienceCount > 0 ? `本机 + ${session.audienceCount} 人` : "本机 1 人") : `${session.audienceCount} 人`) : "未连接"}</span>
         <span>{timerStatusLabel(session.timerStatus)}</span>
         <span>{screenModeLabel(session.screenMode)}</span>
         <span>{page?.section ?? "未选择章节"}</span>
@@ -58,7 +62,7 @@ export function PresenterTopBar({
           active={project.autoAdvanceEnabled}
           onClick={onToggleAutoAdvance}
         />
-        <ToolbarButton icon={<ShieldCheck size={16} />} label="演前检查" title="查看演前检查" onClick={onOpenSettings} />
+        <ToolbarButton icon={<ShieldCheck size={16} />} label="演前检查" title="查看演前检查" onClick={onOpenPreflight} />
         <ToolbarButton icon={<RefreshCw size={16} />} label="应用修改" title="将项目编辑器的最新修改应用到当前演示" onClick={onApplyProjectChanges} />
         <ToolbarButton icon={<BookOpenText size={16} />} label="提词" title="切换提词模式（P）" active={prompterOpen} onClick={onTogglePrompter} />
         <ToolbarButton icon={<Settings size={16} />} label="设置" title="打开设置" onClick={onOpenSettings} />

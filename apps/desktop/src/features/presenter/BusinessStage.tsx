@@ -73,6 +73,11 @@ export function BusinessStage({
   const [frameOpen, setFrameOpen] = useState(false);
   const [frameState, setFrameState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [usingFallback, setUsingFallback] = useState(false);
+  // The fallback choice belongs to one page: switching pages must not carry
+  // the previous page's fallback URL over to the next business page.
+  useEffect(() => {
+    setUsingFallback(false);
+  }, [page.id]);
   const [urlDraft, setUrlDraft] = useState(page.url ?? "");
   const [maskMode, setMaskMode] = useState<"solid" | "blur">("solid");
   const [browserError, setBrowserError] = useState<string | null>(null);
@@ -337,6 +342,11 @@ export function BusinessStage({
             <ShieldCheck size={14} /> {connector?.name ?? "未配置连接器"} · {connectionLabel}
           </span>
           <span>{browserError ?? connectorState?.reason ?? sessionAccessReason ?? connectorState?.role ?? connectorState?.title ?? (frameState === "loading" ? "正在加载业务页" : frameState === "ready" ? usingFallback ? "备用业务页已加载" : "业务页已加载" : activeUrl && !activeUrl.ok ? activeUrl.errors[0] : urlState.valid ? "离线参考画面" : urlState.reason)}{connectorState?.resourceFailures ? ` · 资源失败 ${connectorState.resourceFailures}` : ""}</span>
+          {usingFallback && primaryUrl?.ok ? (
+            <button type="button" className="stage-external-link" title="切回主业务 URL" onClick={() => { setUsingFallback(false); setFrameKey((key) => key + 1); }}>
+              返回主 URL
+            </button>
+          ) : null}
           {activeUrl?.ok ? (
             <button type="button" className="stage-external-link" onClick={() => openBusinessWindow()}>
               新窗口 <ExternalLink size={13} />
@@ -357,7 +367,7 @@ export function BusinessStage({
         ) : (
           <BusinessPreview project={project} page={page} />
         )}
-        {frameState === "error" && session.screenMode === "normal" ? (
+        {frameState === "error" ? (
           <div className="business-frame-error" role="alert">
             <TriangleAlert size={22} />
             <strong>业务页面未能加载</strong>
@@ -366,6 +376,7 @@ export function BusinessStage({
             <div>
               <button type="button" onClick={() => { setFrameKey((key) => key + 1); setFrameState("loading"); setSessionAccess(null); sessionCheckSequence.current += 1; }}>重试</button>
               {fallbackUrl?.ok && !usingFallback ? <button type="button" onClick={() => { setUsingFallback(true); setFrameKey((key) => key + 1); }}>备用 URL</button> : null}
+              {isOfflineFallbackReady(page.offline) && !offlineActive ? <button type="button" onClick={() => onOfflineFallback(true)}>切换离线备用</button> : null}
               <button type="button" onClick={() => openBusinessWindow()}>新窗口</button>
             </div>
           </div>

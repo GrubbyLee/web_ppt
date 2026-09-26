@@ -112,7 +112,7 @@ export function NotesPanel({
           <h1>{page.title}</h1>
         </div>
         <div className="notes-actions">
-          <span className={`save-state save-state--${saveState}`}>
+          <span className={`save-state save-state--${saveState}`} title="保存到本次演示，退出时合并回项目">
             {saveState === "error" ? <TriangleAlert size={14} /> : saveState === "saving" ? <Save size={14} /> : <CheckCircle2 size={14} />}
             {saveLabel}
           </span>
@@ -180,7 +180,6 @@ export function NotesPanel({
           <textarea
             aria-label="Markdown 演讲脚本"
             value={page.script.markdown}
-            onFocus={onSaveIntent}
             onChange={(event) => {
               onSaveIntent();
               onMarkdownChange(event.target.value);

@@ -42,4 +42,15 @@ describe("template resolution", () => {
       errors: ["第 2 行：模板包含不完整的变量占位符。"]
     });
   });
+
+  it("exposes built-in page tokens and keeps them reserved over page variables", () => {
+    const project = createProject("模板项目");
+    const page = project.pages[0]!;
+    page.url = "https://example.com/orders?tenant=acme";
+    page.variables = [{ key: "url", value: "变量值" }];
+    expect(resolveTemplate("{{page.url}} · {{page.businessLabel}} · {{page.title}}", project, page)).toEqual({
+      ok: true,
+      value: `https://example.com/orders?tenant=acme · ${page.businessLabel} · ${page.title}`
+    });
+  });
 });

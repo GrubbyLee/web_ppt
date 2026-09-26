@@ -27,6 +27,7 @@ describe("project preflight", () => {
       basicAuthInstructions: "",
       loginPaths: [],
       logoutPaths: [],
+      roleSwitchPaths: [],
       sandboxPermissions: ["allow-scripts"],
       allowedOrigins: ["https://allowed.example.com"]
     }];
@@ -50,6 +51,7 @@ describe("project preflight", () => {
       basicAuthInstructions: "",
       loginPaths: ["/login"],
       logoutPaths: ["/logout"],
+      roleSwitchPaths: ["/api/role/switch"],
       sandboxPermissions: ["allow-scripts"],
       allowedOrigins: ["https://example.com"]
     }];
@@ -72,7 +74,7 @@ describe("project preflight", () => {
   it("checks configured connector role mappings while allowing login-only probes", () => {
     const project = createProject("会话预检项目");
     project.connectors = [{
-      id: "connector", name: "业务连接器", origin: "https://example.com", mode: "iframe", permission: "observe", securityMode: "interactive", environment: "test", requestHeaders: [], basicAuthInstructions: "", loginPaths: [], logoutPaths: [], sandboxPermissions: ["allow-scripts"], allowedOrigins: ["https://example.com"],
+      id: "connector", name: "业务连接器", origin: "https://example.com", mode: "iframe", permission: "observe", securityMode: "interactive", environment: "test", requestHeaders: [], basicAuthInstructions: "", loginPaths: [], logoutPaths: [], roleSwitchPaths: [], sandboxPermissions: ["allow-scripts"], allowedOrigins: ["https://example.com"],
       sessionProbe: { path: "/api/me", userPath: ["data", "user"], primaryRoleField: "role", rolesField: "roles", roleMappings: [{ presentationRole: "演讲者", connectorRole: "speaker" }, { presentationRole: "演讲者", connectorRole: "speaker-alt" }] }
     }];
     project.pages[0] = { ...project.pages[0]!, connectorId: "connector", url: "https://example.com/page" };

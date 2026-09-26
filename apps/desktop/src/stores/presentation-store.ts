@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Circle, PresentationSession, PrivacyMask, Project, ProjectLayout, Rehearsal, ScreenMode } from "@showit/contracts";
 import { createProject, createSession } from "../lib/project-workspace";
+import { emptyPresenterEditScope, type PresenterEditScope, type PresenterPageEditKind, type PresenterProjectEditKind } from "../lib/presenter-edits";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -12,6 +13,12 @@ type PresentationStore = {
   lastSavedAt: number | null;
   rehearsalStartedAt: number | null;
   rehearsalPageMs: Record<string, number>;
+  /** Runtime-only tracker of live presenter edits, merged into the project
+   *  library on exit (see lib/presenter-edits.ts). Never part of the schema. */
+  presenterEdits: PresenterEditScope;
+  /** True while the presenter's own local audience window is open — it syncs
+   *  over BroadcastChannel, independent of the LAN audience service. */
+  localAudience: boolean;
   setWorkspace: (project: Project, session: PresentationSession) => void;
   setSaveState: (state: SaveState) => void;
   setStagePercent: (stagePercent: number) => void;
@@ -31,7 +38,7 @@ type PresentationStore = {
   pauseTimer: () => void;
   resetTimer: () => void;
   startRehearsal: () => void;
-  finishRehearsal: () => Rehearsal | null;
+  finishRehearsal: (note?: string) => Rehearsal | null;
   setAutoAdvance: (enabled: boolean) => void;
   setAutoAdvanceSeconds: (seconds: number) => void;
   setCurrentPageAutoAdvanceSeconds: (seconds: number | undefined) => void;
@@ -50,6 +57,7 @@ type PresentationStore = {
   audienceReady: () => void;
   setAudienceCount: (count: number) => void;
   audienceDisconnected: () => void;
+  localAudienceClosed: () => void;
   endPresentation: () => void;
 };
 
@@ -86,10 +94,29 @@ function withoutForcedCompletion(session: PresentationSession, stepId: string): 
   return session.forcedStepCompletions.filter((completion) => completion.stepId !== stepId);
 }
 
+type EditTrackingState = {
+  project: Project;
+  session: PresentationSession;
+  presenterEdits: PresenterEditScope;
+};
+
+function markPageEdit(state: EditTrackingState, kind: PresenterPageEditKind): PresenterEditScope {
+  const pageId = state.project.pages[state.session.currentPageIndex]?.id;
+  if (!pageId) return state.presenterEdits;
+  const current = state.presenterEdits.pageEdits[pageId] ?? [];
+  if (current.includes(kind)) return state.presenterEdits;
+  return { ...state.presenterEdits, pageEdits: { ...state.presenterEdits.pageEdits, [pageId]: [...current, kind] } };
+}
+
+function markProjectEdit(state: EditTrackingState, kind: PresenterProjectEditKind): PresenterEditScope {
+  if (state.presenterEdits.projectEdits.includes(kind)) return state.presenterEdits;
+  return { ...state.presenterEdits, projectEdits: [...state.presenterEdits.projectEdits, kind] };
+}
+
 const presetStagePercent: Record<ProjectLayout["preset"], number> = {
-  stage: 72,
-  balanced: 62,
-  notes: 54
+  stage: 66,
+  balanced: 56,
+  notes: 50
 };
 
 export function elapsedMs(session: PresentationSession, total: boolean, now = Date.now()): number {
@@ -119,19 +146,29 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
   lastSavedAt: null,
   rehearsalStartedAt: null,
   rehearsalPageMs: {},
-  setWorkspace: (project, session) => set({ project, session, hydrated: true, rehearsalStartedAt: null, rehearsalPageMs: {} }),
+  presenterEdits: emptyPresenterEditScope,
+  localAudience: false,
+  setWorkspace: (project, session) => set({ project, session, hydrated: true, rehearsalStartedAt: null, rehearsalPageMs: {}, presenterEdits: emptyPresenterEditScope, localAudience: false }),
   setSaveState: (saveState) =>
     set({
       saveState,
       lastSavedAt: saveState === "saved" ? Date.now() : null
     }),
   setStagePercent: (stagePercent) =>
-    set((state) => ({
-      project: {
-        ...state.project,
-        layout: { ...state.project.layout, stagePercent: Math.round(Math.min(75, Math.max(50, stagePercent))) }
-      }
-    })),
+    set((state) => {
+      const clamped = Math.round(Math.min(66, Math.max(50, stagePercent)));
+      // Dragging the divider leaves the preset chip stale unless it tracks
+      // the closest named layout.
+      const preset = (Object.keys(presetStagePercent) as Array<ProjectLayout["preset"]>).reduce((best, candidate) =>
+        Math.abs(presetStagePercent[candidate] - clamped) < Math.abs(presetStagePercent[best] - clamped) ? candidate : best);
+      return {
+        project: {
+          ...state.project,
+          layout: { ...state.project.layout, stagePercent: clamped, preset }
+        },
+        presenterEdits: markProjectEdit(state, "layout")
+      };
+    }),
   setLayoutPreset: (preset) =>
     set((state) => ({
       project: {
@@ -141,7 +178,8 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
           preset,
           stagePercent: presetStagePercent[preset]
         }
-      }
+      },
+      presenterEdits: markProjectEdit(state, "layout")
     })),
   setNoteFontScale: (noteFontScale) =>
     set((state) => ({
@@ -151,7 +189,8 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
           ...state.project.layout,
           noteFontScale: Math.min(1.35, Math.max(0.85, Number(noteFontScale.toFixed(2))))
         }
-      }
+      },
+      presenterEdits: markProjectEdit(state, "layout")
     })),
   setActivePage: (index) =>
     set((state) => {
@@ -190,7 +229,7 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         const { url: _removedUrl, ...pageWithoutUrl } = page;
         return pageWithoutUrl;
       });
-      return { project: { ...state.project, pages }, session: withSequence(state.session, {}) };
+      return { project: { ...state.project, pages }, session: withSequence(state.session, {}), presenterEdits: markPageEdit(state, "url") };
     }),
   updateScript: (markdown) =>
     set((state) => {
@@ -202,7 +241,8 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
             index === pageIndex ? { ...page, script: { ...page.script, markdown } } : page
           )
         },
-        session: withSequence(state.session, {})
+        session: withSequence(state.session, {}),
+        presenterEdits: markPageEdit(state, "script")
       };
     }),
   toggleStep: (stepId) =>
@@ -402,7 +442,7 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         pendingHighRiskStepId: null
       })
     })),
-  finishRehearsal: () => {
+  finishRehearsal: (note = "") => {
     let rehearsal: Rehearsal | null = null;
     set((state) => {
       if (state.rehearsalStartedAt === null) return state;
@@ -417,7 +457,7 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         startedAt: state.rehearsalStartedAt,
         endedAt,
         totalElapsedMs: settled.totalElapsedMs,
-        note: "",
+        note: note.trim().slice(0, 2_000),
         pages: state.project.pages.map((page) => ({
           pageId: page.id,
           plannedMs: page.estimatedSeconds * 1_000,
@@ -434,11 +474,13 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
   },
   setAutoAdvance: (enabled) =>
     set((state) => ({
-      project: { ...state.project, autoAdvanceEnabled: enabled }
+      project: { ...state.project, autoAdvanceEnabled: enabled },
+      presenterEdits: markProjectEdit(state, "autoAdvance")
     })),
   setAutoAdvanceSeconds: (seconds) =>
     set((state) => ({
-      project: { ...state.project, autoAdvanceSeconds: Math.round(Math.min(14_400, Math.max(1, seconds))) }
+      project: { ...state.project, autoAdvanceSeconds: Math.round(Math.min(14_400, Math.max(1, seconds))) },
+      presenterEdits: markProjectEdit(state, "autoAdvance")
     })),
   setCurrentPageAutoAdvanceSeconds: (seconds) =>
     set((state) => ({
@@ -449,7 +491,8 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
             ? { ...page, autoAdvanceSeconds: seconds === undefined ? undefined : Math.round(Math.min(14_400, Math.max(1, seconds))) }
             : page
         )
-      }
+      },
+      presenterEdits: markPageEdit(state, "autoAdvance")
     })),
   setAutoAdvanceRunning: (running) =>
     set((state) => {
@@ -508,7 +551,8 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         ...state.project,
         pages: state.project.pages.map((page, index) => index === state.session.currentPageIndex ? { ...page, privacyMasks: [...page.privacyMasks, mask] } : page)
       },
-      session: withSequence(state.session, { annotationTool: "none" })
+      session: withSequence(state.session, { annotationTool: "none" }),
+      presenterEdits: markPageEdit(state, "masks")
     })),
   clearPrivacyMasks: () =>
     set((state) => ({
@@ -516,7 +560,8 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         ...state.project,
         pages: state.project.pages.map((page, index) => index === state.session.currentPageIndex ? { ...page, privacyMasks: [] } : page)
       },
-      session: withSequence(state.session, { annotationTool: "none" })
+      session: withSequence(state.session, { annotationTool: "none" }),
+      presenterEdits: markPageEdit(state, "masks")
     })),
   clearAnnotations: () =>
     set((state) => ({
@@ -524,15 +569,15 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
     })),
   audienceReady: () =>
     set((state) => ({
+      localAudience: true,
       session: withSequence(state.session, {
-        audienceStatus: "synced",
-        audienceCount: Math.max(1, state.session.audienceCount)
+        audienceStatus: "synced"
       })
     })),
   setAudienceCount: (count) =>
     set((state) => {
       const audienceCount = Math.max(0, Math.min(20, Math.floor(count)));
-      const audienceStatus = audienceCount > 0 ? "synced" as const : "connecting" as const;
+      const audienceStatus = audienceCount > 0 || state.localAudience ? "synced" as const : "connecting" as const;
       if (state.session.audienceCount === audienceCount && state.session.audienceStatus === audienceStatus) return state;
       return { session: withSequence(state.session, { audienceStatus, audienceCount }) };
     }),
@@ -545,12 +590,26 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
       if (["x1", "y1", "x2", "y2"].every((key) => Math.abs(existing[key as keyof typeof bounds] - bounds[key as keyof typeof bounds]) < 0.0005)) return state;
       return {
         project: { ...state.project, pages: state.project.pages.map((item, index) => index === pageIndex ? { ...item, privacyMasks: item.privacyMasks.map((mask) => mask.id === maskId ? { ...mask, ...bounds } : mask) } : item) },
-        session: withSequence(state.session, {})
+        session: withSequence(state.session, {}),
+        presenterEdits: markPageEdit(state, "masks")
       };
     }),
   audienceDisconnected: () =>
     set((state) => ({
-      session: withSequence(state.session, { audienceStatus: "disconnected", audienceCount: 0 })
+      // The LAN share dropped, but the presenter's own local audience window
+      // (if open) keeps syncing over BroadcastChannel.
+      session: withSequence(state.session, {
+        audienceStatus: state.localAudience ? "synced" : "disconnected",
+        audienceCount: 0
+      })
+    })),
+  localAudienceClosed: () =>
+    set((state) => ({
+      localAudience: false,
+      session: withSequence(state.session, {
+        audienceStatus: state.session.audienceCount > 0 ? state.session.audienceStatus : "disconnected",
+        audienceCount: state.session.audienceCount
+      })
     })),
   endPresentation: () =>
     set((state) => ({
@@ -565,6 +624,8 @@ export const usePresentationStore = create<PresentationStore>((set) => ({
         // pre-authorized for the next presentation or rehearsal.
         offlineNetworkGrants: [],
         pendingHighRiskStepId: null
-      })
+      }),
+      presenterEdits: emptyPresenterEditScope,
+      localAudience: false
     }))
 }));

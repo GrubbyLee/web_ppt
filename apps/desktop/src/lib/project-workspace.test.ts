@@ -20,6 +20,53 @@ describe("project workspace helpers", () => {
     expect(duplicate.name).toContain("副本");
   });
 
+  it("deep-copies nested structures and re-keys connector and mask identities", () => {
+    const source = createProject("深拷贝项目");
+    source.connectors.push({
+      id: "connector-src",
+      name: "业务控制台",
+      origin: "https://example.com",
+      mode: "extension",
+      permission: "assist",
+      securityMode: "interactive",
+      environment: "默认环境",
+      requestHeaders: [{ name: "X-Trace", value: "abc" }],
+      basicAuthInstructions: "",
+      loginPaths: ["/login"],
+      logoutPaths: ["/logout"],
+      roleSwitchPaths: [],
+      sandboxPermissions: ["allow-scripts", "allow-same-origin"],
+      allowedOrigins: ["https://example.com"],
+      sessionProbe: { path: "/api/me", userPath: ["data", "user"], primaryRoleField: "role", rolesField: "roles", roleMappings: [{ presentationRole: "presenter", connectorRole: "admin" }] }
+    });
+    const connector = source.connectors[0]!;
+    source.pages[0]!.connectorId = connector.id;
+    source.pages[0]!.privacyMasks = [{ id: "mask-keep", x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.4, mode: "solid", locator: { strategy: "id", value: "balance" } }];
+    source.pages[0]!.variables = [{ key: "tier", value: "vip" }];
+    source.pages[0]!.offline = { kind: "html", content: "<p>备用</p>", allowedNetworkOrigins: ["https://api.example.com"] };
+    source.variables = [{ key: "region", value: "cn" }];
+
+    const duplicate = duplicateProject(source);
+    expect(duplicate.connectors).toHaveLength(1);
+    expect(duplicate.connectors[0]!.id).not.toBe(connector.id);
+    expect(duplicate.pages[0]!.connectorId).not.toBe(connector.id);
+    expect(duplicate.connectors.find((item) => item.id === duplicate.pages[0]!.connectorId)?.name).toBe(connector.name);
+
+    const page = duplicate.pages[0]!;
+    expect(page.privacyMasks[0]!.id).not.toBe("mask-keep");
+    expect(page.privacyMasks[0]).not.toBe(source.pages[0]!.privacyMasks[0]);
+    expect(page.variables[0]).not.toBe(source.pages[0]!.variables[0]);
+    expect(page.offline).not.toBe(source.pages[0]!.offline);
+    expect(duplicate.connectors[0]!.requestHeaders[0]).not.toBe(connector.requestHeaders[0]);
+    expect(duplicate.connectors[0]!.sessionProbe?.roleMappings[0]).not.toBe(connector.sessionProbe?.roleMappings[0]);
+    expect(duplicate.variables[0]).not.toBe(source.variables[0]);
+
+    // Mutating the duplicate must not leak back into the source project.
+    page.privacyMasks[0]!.x1 = 0.9;
+    expect(source.pages[0]!.privacyMasks[0]!.x1).toBe(0.1);
+    expect(ProjectSchema.safeParse(duplicate).success).toBe(true);
+  });
+
   it("normalizes page order and planned duration", () => {
     const project = createProject("顺序测试");
     const second = { ...project.pages[0]!, id: "page-second", order: 8, estimatedSeconds: 30 };

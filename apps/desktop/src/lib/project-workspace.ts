@@ -110,8 +110,23 @@ async function sha256(value: Uint8Array | string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Structurally equal values must serialize identically: a raw object literal
+ * and its Zod-parsed round-trip differ only in key insertion order, which
+ * JSON.stringify preserves. Trust fingerprints go through this canonical form
+ * so "trusted" does not flip to "changed" merely by saving and reloading.
+ */
+export function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => [key, canonicalValue(item)]));
+}
+
 export function fingerprintProject(project: Project): Promise<string> {
-  return sha256(JSON.stringify(normalizeProject(project)));
+  return sha256(JSON.stringify(canonicalValue(normalizeProject(project))));
 }
 
 async function deriveLegacyPackageKey(password: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
@@ -215,7 +230,7 @@ export function createProject(name: string): Project {
       endDescription: "感谢观看",
       audienceTitle: "Showit 观众屏"
     },
-    layout: { stagePercent: 68, preset: "stage", noteFontScale: 1 },
+    layout: { stagePercent: 56, preset: "stage", noteFontScale: 1 },
     connectors: [],
     pages: [page]
   };
@@ -253,27 +268,79 @@ export function normalizeProject(project: Project): Project {
   const pages = project.pages.map((page, index) => ({ ...page, order: index }));
   return {
     ...project,
+    // Migrate layouts saved by older builds to the 1:1..2:1 divider range.
+    layout: { ...project.layout, stagePercent: Math.round(Math.min(66, Math.max(50, project.layout.stagePercent))) },
     pages,
     totalPlannedSeconds: Math.max(1, pages.reduce((total, page) => total + page.estimatedSeconds, 0))
   };
 }
 
+export function duplicatePage(source: PresentationPage, order: number, remap: { connectorId?: (id: string) => string } = {}): PresentationPage {
+  return {
+    ...source,
+    id: createId("page"),
+    order,
+    ...(source.connectorId ? { connectorId: remap.connectorId?.(source.connectorId) ?? source.connectorId } : {}),
+    script: {
+      ...source.script,
+      steps: source.script.steps.map((step) => ({
+        ...step,
+        id: createId("step"),
+        ...(step.recordedAction
+          ? {
+              recordedAction: {
+                ...step.recordedAction,
+                ...("locator" in step.recordedAction && step.recordedAction.locator ? { locator: { ...step.recordedAction.locator } } : {}),
+                ...("input" in step.recordedAction && step.recordedAction.input ? { input: { ...step.recordedAction.input } } : {})
+              }
+            }
+          : {}),
+        ...(step.expectedCondition
+          ? { expectedCondition: { ...step.expectedCondition, ...("locator" in step.expectedCondition && step.expectedCondition.locator ? { locator: { ...step.expectedCondition.locator } } : {}) } }
+          : {})
+      }))
+    },
+    privacyMasks: source.privacyMasks.map((mask) => ({
+      ...mask,
+      id: createId("mask"),
+      ...(mask.locator ? { locator: { ...mask.locator } } : {})
+    })),
+    variables: source.variables.map((variable) => ({ ...variable })),
+    ...(source.offline ? { offline: { ...source.offline } } : {})
+  };
+}
+
 export function duplicateProject(source: Project): Project {
   const projectId = createId("project");
-  const pages = source.pages.map((page, index) => ({
-    ...page,
-    id: createId("page"),
-    order: index,
-    script: {
-      ...page.script,
-      steps: page.script.steps.map((step) => ({ ...step, id: createId("step") }))
-    }
+  // Duplicate every nested object and re-key identifiers: shared references
+  // would let edits to the copy leak into the original project, and repeated
+  // connector ids across projects make diagnostics ambiguous.
+  const connectorIdMap = new Map(source.connectors.map((connector) => [connector.id, createId("connector")]));
+  const connectors = source.connectors.map((connector) => ({
+    ...connector,
+    id: connectorIdMap.get(connector.id)!,
+    requestHeaders: connector.requestHeaders.map((header) => ({ ...header })),
+    ...(connector.sessionProbe
+      ? {
+          sessionProbe: {
+            ...connector.sessionProbe,
+            roleMappings: connector.sessionProbe.roleMappings.map((mapping) => ({ ...mapping }))
+          }
+        }
+      : {})
   }));
+  const pages = source.pages.map((page, index) =>
+    duplicatePage(page, index, page.connectorId ? { connectorId: (id) => connectorIdMap.get(id) ?? id } : {})
+  );
   return normalizeProject({
     ...source,
     id: projectId,
     name: `${source.name} 副本`,
     status: "draft",
+    connectors,
+    variables: source.variables.map((variable) => ({ ...variable })),
+    sensitiveVariables: source.sensitiveVariables.map((variable) => ({ ...variable })),
+    brand: { ...source.brand },
     pages
   });
 }

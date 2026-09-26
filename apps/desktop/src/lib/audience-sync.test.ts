@@ -11,6 +11,19 @@ describe("audience event guard", () => {
     expect(accepts({ ...snapshot, nonce: "nonce-abcdefgh", seq: 1 })).toBe(false);
     expect(accepts({ ...snapshot, nonce: "nonce-ijklmnop", seq: 3, sessionId: "session-other" })).toBe(false);
   });
+
+  it("accepts a restarted presenter after bye or a large sequence reset", () => {
+    const accepts = createAudienceEventGuard("session-valid");
+    const snapshot = (seq: number, nonce: string) => ({ type: "snapshot" as const, sessionId: "session-valid", seq, nonce, at: Date.now(), project: sampleProject, session: { ...sampleSession, id: "session-valid", sequence: seq } });
+    expect(accepts(snapshot(200, "nonce-run1-a"))).toBe(true);
+    expect(accepts({ type: "bye" as const, sessionId: "session-valid", seq: 200, nonce: "nonce-run1-bye", at: Date.now() })).toBe(true);
+    expect(accepts(snapshot(1, "nonce-run2-a"))).toBe(true);
+
+    const crashGuard = createAudienceEventGuard("session-valid");
+    expect(crashGuard(snapshot(300, "nonce-run3-a"))).toBe(true);
+    expect(crashGuard(snapshot(2, "nonce-run4-a"))).toBe(true);
+    expect(crashGuard(snapshot(2, "nonce-run4-b"))).toBe(false);
+  });
 });
 
 describe("laser delta detection", () => {

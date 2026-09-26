@@ -41,8 +41,15 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 900 
 
 try {
   const presenter = await context.newPage();
-  await presenter.goto(`${appUrl}/#/presenter`);
+  await presenter.goto(`${appUrl}/#/projects`);
   await presenter.waitForLoadState("networkidle");
+  // The bare /#/presenter route redirects to the library — launch the sample
+  // the way a user does: click 运行 and clear the trust dialog if it appears.
+  const sampleRow = presenter.locator(".project-row").filter({ hasText: "LCAPIM 五角色治理闭环" }).first();
+  await sampleRow.getByTitle("启动演示运行时").click();
+  const trustButton = presenter.getByRole("button", { name: "重新信任并运行", exact: true });
+  if (await trustButton.waitFor({ state: "visible", timeout: 8_000 }).then(() => true).catch(() => false)) await trustButton.click();
+  await presenter.locator(".presenter-shell").waitFor({ state: "visible" });
 
   await presenter.getByText("Showit").first().waitFor({ state: "visible" });
   await presenter.getByText("LCAPIM 五角色治理闭环").first().waitFor({ state: "visible" });
@@ -53,7 +60,7 @@ try {
     return Boolean(strip) && !strip.textContent?.includes("正在检查");
   });
   assert.match(await presenter.locator(".business-frame-wrap iframe").getAttribute("src") ?? "", /\/console\/\?view=overview$/);
-  await presenter.getByText("请先登录 系统管理员 演示账号，然后刷新业务页。", { exact: true }).waitFor({ state: "visible" });
+  await presenter.getByText("请先登录“系统管理员”对应的业务账号，然后刷新业务页。", { exact: false }).waitFor({ state: "visible" });
   const accountDirectory = await (await context.request.get(`${appUrl}/api/lc/v1/demo/accounts`)).json();
   const administrator = accountDirectory.data.items.find((account) => account.role === "admin");
   assert.ok(administrator, "LCAPIM administrator demo account is unavailable");
@@ -165,6 +172,7 @@ try {
   await presenter.keyboard.press("r");
   await presenter.getByTitle("结束并保存排练记录").waitFor({ state: "visible" });
   await presenter.keyboard.press("r");
+  await presenter.getByRole("button", { name: "保存排练记录", exact: true }).click();
   await presenter.getByTitle("从第一页开始排练").waitFor({ state: "visible" });
   await presenter.keyboard.press("Shift+/");
   await presenter.getByText("演示设置", { exact: true }).waitFor({ state: "visible" });
@@ -186,7 +194,7 @@ try {
 
   const mobile = await context.newPage();
   await mobile.setViewportSize({ width: 375, height: 812 });
-  await mobile.goto(`${appUrl}/#/presenter`);
+  await mobile.goto(`${appUrl}/#/presenter/lc-apim-five-role-demo`);
   await mobile.waitForLoadState("networkidle");
   await mobile.locator(".presenter-shell").waitFor({ state: "visible" });
   await assertViewportFit(mobile, "presenter at 375px");

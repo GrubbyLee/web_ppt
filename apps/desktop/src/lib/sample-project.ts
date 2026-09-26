@@ -1,4 +1,5 @@
 import type { PresentationPage, PresentationSession, PresentationStep, Project } from "@showit/contracts";
+import { canonicalValue } from "./project-workspace";
 
 type SeedPage = {
   id: string;
@@ -459,7 +460,7 @@ export const sampleProject: Project = {
     audienceTitle: "LCAPIM 演示观众屏"
   },
   layout: {
-    stagePercent: 68,
+    stagePercent: 56,
     preset: "stage",
     noteFontScale: 1
   },
@@ -476,6 +477,7 @@ export const sampleProject: Project = {
       basicAuthInstructions: "如需登录，请在业务浏览器中完成本机账号登录。",
       loginPaths: ["/api/lc/v1/auth/login"],
       logoutPaths: ["/api/lc/v1/session/logout"],
+      roleSwitchPaths: [],
       sessionProbe: {
         path: "/api/lc/v1/session/status",
         userPath: ["data", "user"],
@@ -505,6 +507,7 @@ const legacySampleProject: Project = {
     allowedOrigins: ["http://localhost:3000"],
     loginPaths: ["/login", "/sso"],
     logoutPaths: ["/logout"],
+    roleSwitchPaths: [],
     sessionProbe: undefined
   } : connector),
   pages: sampleProject.pages.map((page) => ({
@@ -523,17 +526,9 @@ const priorBundledSampleProject: Project = {
 
 /** Only replace the exact bundled v1 sample; user changes are intentionally preserved. */
 export function migrateLegacyBundledSample(project: Project): Project | null {
-  const stableValue = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(stableValue);
-    if (!value || typeof value !== "object") return value;
-    return Object.fromEntries(Object.entries(value)
-      .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => [key, stableValue(item)]));
-  };
-  const serialized = JSON.stringify(stableValue(project));
-  const isUntouchedBundledProject = serialized === JSON.stringify(stableValue(legacySampleProject))
-    || serialized === JSON.stringify(stableValue(priorBundledSampleProject));
+  const serialized = JSON.stringify(canonicalValue(project));
+  const isUntouchedBundledProject = serialized === JSON.stringify(canonicalValue(legacySampleProject))
+    || serialized === JSON.stringify(canonicalValue(priorBundledSampleProject));
   if (project.id !== sampleProject.id || !isUntouchedBundledProject) return null;
   return structuredClone(sampleProject);
 }

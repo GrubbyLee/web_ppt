@@ -4,7 +4,7 @@ import { Archive, Copy, Download, FileDown, FileUp, FolderOpen, Play, Plus, Refr
 import { Button, Input, Modal } from "antd";
 import type { Project } from "@showit/contracts";
 import { PackagePasswordError, createProject, createSession, downloadProjectPackage, duplicateProject, parseProjectPackage } from "../../lib/project-workspace";
-import { createProjectSnapshot, deleteWorkspace, listWorkspaces, saveWorkspace, setActiveProject, type Workspace } from "../../lib/persistence";
+import { createProjectSnapshot, deleteWorkspace, listProjectVersions, listWorkspaces, saveWorkspace, setActiveProject, type Workspace } from "../../lib/persistence";
 import { sampleProject } from "../../lib/sample-project";
 import { ToolbarButton } from "../../components/ToolbarButton";
 import { forgetProjectTrust, inspectProjectImport, projectTrustState, trustProject, type ProjectImportReview } from "../../lib/project-trust";
@@ -268,20 +268,35 @@ export function ProjectWorkspace() {
                   <div><dt>连接器</dt><dd>{project.connectors.length}</dd></div>
                 </dl>
                 <section className="project-row__actions" aria-label={`${project.name} 操作`}>
-                  <ToolbarButton icon={<Play size={16} />} label="运行" title="启动演示运行时" variant="primary" onClick={() => void runProject(workspace)} />
+                  <ToolbarButton icon={<Play size={16} />} label="运行" title="启动演示运行时" variant="primary" onClick={() => {
+                    if (project.status === "archived" && !window.confirm(`“${project.name}”已归档，仍要启动演示吗？`)) return;
+                    void runProject(workspace);
+                  }} />
                   <ToolbarButton icon={<FolderOpen size={16} />} title="编辑项目" onClick={() => navigate(`/projects/${project.id}/edit`)} />
                   <ToolbarButton icon={<Copy size={16} />} title="复制项目" onClick={async () => {
                     const sourceTrusted = await projectTrustState(project) === "trusted";
                     const duplicate = duplicateProject(project);
                     await persist({ project: duplicate, session: createSession(duplicate) });
                     if (sourceTrusted) await trustProject(duplicate);
+                    setMessage(`已创建“${project.name}”的副本${sourceTrusted ? "，并继承运行信任" : ""}。`);
                   }} />
                   <ToolbarButton icon={<FileDown size={16} />} title="导出 .showit 文件" onClick={() => { setPackageDialog({ mode: "export", project }); setPackageError(null); }} />
                   <ToolbarButton icon={<ShieldOff size={16} />} title="取消项目信任，停止脚本和自动操作运行" onClick={() => { forgetProjectTrust(project.id); setMessage(`已取消“${project.name}”的运行信任。`); }} />
                   <ToolbarButton
                     icon={<Archive size={16} />}
-                    title={project.status === "archived" ? "恢复为草稿" : "归档项目"}
-                    onClick={() => persist({ ...workspace, project: { ...project, status: project.status === "archived" ? "draft" : "archived" } })}
+                    title={project.status === "archived" ? "恢复项目" : "归档项目"}
+                    onClick={() => {
+                      if (project.status !== "archived") {
+                        persist({ ...workspace, project: { ...project, status: "archived" } });
+                        return;
+                      }
+                      // Restoring goes back to 已发布 when the project has
+                      // published versions, otherwise to a draft.
+                      void listProjectVersions(project.id)
+                        .then((versions): Project["status"] => versions.length > 0 ? "published" : "draft")
+                        .catch((): Project["status"] => "draft")
+                        .then((status) => persist({ ...workspace, project: { ...project, status } }));
+                    }}
                   />
                   <ToolbarButton
                     icon={<Trash2 size={16} />}

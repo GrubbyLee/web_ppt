@@ -207,6 +207,26 @@ describe("presentation store", () => {
     expect(usePresentationStore.getState().session).toMatchObject({ audienceStatus: "connecting", audienceCount: 0 });
   });
 
+  it("counts the local audience window without the LAN poll marking it disconnected", () => {
+    usePresentationStore.getState().audienceReady();
+    expect(usePresentationStore.getState().localAudience).toBe(true);
+    expect(usePresentationStore.getState().session.audienceStatus).toBe("synced");
+    // The per-second LAN status poll must not flip a locally-open screen to 未连接.
+    usePresentationStore.getState().setAudienceCount(0);
+    expect(usePresentationStore.getState().session).toMatchObject({ audienceStatus: "synced", audienceCount: 0 });
+    usePresentationStore.getState().setAudienceCount(2);
+    expect(usePresentationStore.getState().session).toMatchObject({ audienceStatus: "synced", audienceCount: 2 });
+    // LAN share dropping keeps the local window connected…
+    usePresentationStore.getState().audienceDisconnected();
+    expect(usePresentationStore.getState().session).toMatchObject({ audienceStatus: "synced", audienceCount: 0 });
+    // …while closing the local window returns to plain LAN accounting.
+    usePresentationStore.getState().localAudienceClosed();
+    expect(usePresentationStore.getState().localAudience).toBe(false);
+    expect(usePresentationStore.getState().session).toMatchObject({ audienceStatus: "disconnected", audienceCount: 0 });
+    usePresentationStore.getState().setAudienceCount(0);
+    expect(usePresentationStore.getState().session.audienceStatus).toBe("connecting");
+  });
+
   it("records planned and actual time for a rehearsal", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-13T00:00:00Z"));
@@ -214,11 +234,37 @@ describe("presentation store", () => {
     vi.advanceTimersByTime(5_000);
     usePresentationStore.getState().setActivePage(1);
     vi.advanceTimersByTime(3_000);
-    const rehearsal = usePresentationStore.getState().finishRehearsal();
+    const rehearsal = usePresentationStore.getState().finishRehearsal("  开场偏慢  ");
 
     expect(rehearsal?.totalElapsedMs).toBe(8_000);
     expect(rehearsal?.pages[0]?.actualMs).toBe(5_000);
     expect(rehearsal?.pages[1]?.actualMs).toBe(3_000);
+    expect(rehearsal?.note).toBe("开场偏慢");
     expect(usePresentationStore.getState().rehearsalStartedAt).toBeNull();
+  });
+
+  it("tracks presenter edits per page and field, and clears them on exit or workspace swap", () => {
+    usePresentationStore.getState().updateScript("现场脚本");
+    usePresentationStore.getState().setActivePage(1);
+    usePresentationStore.getState().addPrivacyMask({ id: "mask-edit", x1: 0.1, y1: 0.2, x2: 0.4, y2: 0.5, mode: "blur" });
+    usePresentationStore.getState().setStagePercent(60);
+    usePresentationStore.getState().setAutoAdvance(true);
+
+    expect(usePresentationStore.getState().presenterEdits).toEqual({
+      pageEdits: {
+        [sampleProject.pages[0]!.id]: ["script"],
+        [sampleProject.pages[1]!.id]: ["masks"]
+      },
+      projectEdits: ["layout", "autoAdvance"]
+    });
+
+    // Applying an editor version (setWorkspace) consciously discards live edits.
+    usePresentationStore.getState().setWorkspace(sampleProject, { ...sampleSession });
+    expect(usePresentationStore.getState().presenterEdits).toEqual({ pageEdits: {}, projectEdits: [] });
+
+    usePresentationStore.getState().updateScript("再次修改");
+    expect(usePresentationStore.getState().presenterEdits.pageEdits[sampleProject.pages[0]!.id]).toEqual(["script"]);
+    usePresentationStore.getState().endPresentation();
+    expect(usePresentationStore.getState().presenterEdits).toEqual({ pageEdits: {}, projectEdits: [] });
   });
 });

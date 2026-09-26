@@ -34,7 +34,7 @@ function isAllowedBusinessUrl(value: string): boolean {
 const businessUrl = z
   .string()
   .url("请输入完整的 HTTP(S) URL。")
-  .refine(isAllowedBusinessUrl, "只允许不含凭据或敏感查询参数的 HTTPS 或已登记本地开发 URL。");
+  .refine(isAllowedBusinessUrl, "只允许 HTTPS，或 localhost/127.0.0.1 的 HTTP 地址，且不能包含凭据或敏感查询参数。");
 
 function isAllowedBusinessUrlTemplate(value: string): boolean {
   if (!value.includes("{{")) return isAllowedBusinessUrl(value);
@@ -299,13 +299,16 @@ export const PresentationConnectorSchema = z.object({
   basicAuthInstructions: z.string().max(1_000).default(""),
   loginPaths: z.array(connectorPath).max(20).default([]),
   logoutPaths: z.array(connectorPath).max(20).default([]),
+  roleSwitchPaths: z.array(connectorPath).max(20).default([]),
   sessionProbe: ConnectorSessionProbeSchema.optional(),
   sandboxPermissions: z.array(z.enum(["allow-scripts", "allow-same-origin", "allow-forms"])).max(3),
   allowedOrigins: z.array(businessUrl).min(1).max(20)
 });
 
 export const ProjectLayoutSchema = z.object({
-  stagePercent: z.number().int().min(50).max(75).default(68),
+  // 5:4 stage-to-notes default; adjustment is clamped to [1:1, 2:1] (50–66%).
+  // Upper bound stays tolerant so projects saved by older builds keep parsing.
+  stagePercent: z.number().int().min(50).max(75).default(56),
   preset: z.enum(["stage", "balanced", "notes"]).default("stage"),
   noteFontScale: z.number().min(0.85).max(1.35).default(1)
 });
@@ -359,6 +362,7 @@ export const ProjectVersionSchema = z.object({
   version: z.number().int().positive(),
   kind: z.enum(["publish", "manual", "auto"]).default("publish"),
   createdAt: z.number().int().positive(),
+  publishedBy: z.string().trim().max(120).default(""),
   changeSummary: z.string().max(500),
   snapshot: ProjectSchema
 });
@@ -478,7 +482,7 @@ export function validateBusinessUrl(value: string): { valid: boolean; reason?: s
   try {
     const url = new URL(value);
     if (isAllowedBusinessUrl(url.toString())) return { valid: true };
-    return { valid: false, reason: "只允许不含凭据或敏感查询参数的 HTTPS 或已登记本地开发 URL。" };
+    return { valid: false, reason: "只允许 HTTPS，或 localhost/127.0.0.1 的 HTTP 地址，且不能包含凭据或敏感查询参数。" };
   } catch {
     return { valid: false, reason: "请输入完整的 HTTP(S) URL。" };
   }

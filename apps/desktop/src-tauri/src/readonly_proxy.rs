@@ -17,13 +17,15 @@ use tokio::sync::{watch, Mutex, RwLock};
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
 
-// Each project gets its own loopback listener, so every business origin keeps
-// an isolated browser cookie jar: cookies issued for one demo target can never
-// be replayed to another target that happens to share the proxy origin.
+// Each (project, business origin) pair gets its own loopback listener, so every
+// business origin keeps a stable and isolated browser cookie jar: alternating
+// demo pages between two connectors never destroys the session of the other,
+// and cookies issued for one demo target can never be replayed to another
+// target that happens to share the proxy origin.
 #[derive(Clone)]
 pub struct ReadonlyProxyService {
     client: reqwest::Client,
-    instances: Arc<Mutex<HashMap<String, ProxyInstance>>>,
+    instances: Arc<Mutex<HashMap<(String, String), ProxyInstance>>>,
 }
 
 struct ProxyInstance {
@@ -124,25 +126,30 @@ impl ReadonlyProxyService {
             request_headers: safe_headers,
         };
         let mut instances = self.instances.lock().await;
-        if let Some(instance) = instances.get(&project_id) {
-            if instance.target_origin == target_origin {
-                *instance.config.write().await = Some(config);
-                return Ok(ReadonlyProxyTarget {
-                    url: instance.proxy_url(&page),
-                });
-            }
+        let key = (project_id, target_origin);
+        if let Some(instance) = instances.get(&key) {
+            *instance.config.write().await = Some(config);
+            return Ok(ReadonlyProxyTarget {
+                url: instance.proxy_url(&page),
+            });
         }
         let instance = spawn_proxy_instance(self.client.clone(), config)?;
         let url = instance.proxy_url(&page);
-        if let Some(previous) = instances.insert(project_id, instance) {
-            let _ = previous.shutdown.send(true);
-        }
+        instances.insert(key, instance);
         Ok(ReadonlyProxyTarget { url })
     }
 
     pub async fn clear(&self, project_id: &str) {
-        if let Some(instance) = self.instances.lock().await.remove(project_id) {
-            let _ = instance.shutdown.send(true);
+        let mut instances = self.instances.lock().await;
+        let stale: Vec<(String, String)> = instances
+            .keys()
+            .filter(|(project, _origin)| project == project_id)
+            .cloned()
+            .collect();
+        for key in stale {
+            if let Some(instance) = instances.remove(&key) {
+                let _ = instance.shutdown.send(true);
+            }
         }
     }
 }
@@ -310,6 +317,67 @@ fn error_response(status: StatusCode, code: &'static str) -> Response {
         .into_response()
 }
 
+/// Main-frame navigations would otherwise render raw JSON; give the presenter
+/// a readable page while subresources keep the machine-readable code.
+fn error_document(status: StatusCode, code: &'static str) -> Response {
+    let (title, description) = match code {
+        "SHOWIT_PRESENTATION_READ_ONLY" => (
+            "写入请求已被演示保护拦截",
+            "演示期间业务页面保持只读。如需登录或切换角色，请使用项目中配置的放行路径。",
+        ),
+        "SHOWIT_PROXY_NOT_CONFIGURED" => (
+            "只读代理尚未配置",
+            "请退出演示后重新进入，让 Showit 重新建立本机只读代理。",
+        ),
+        "SHOWIT_PROXY_HOST_REJECTED" => (
+            "请求主机不受信任",
+            "该请求的 Host 不是本机只读代理地址，已被拒绝。",
+        ),
+        "SHOWIT_PROXY_REDIRECT_BLOCKED" => (
+            "跳转已被拦截",
+            "业务系统尝试跳转到其他域名；为保持只读保护，此类跳转被阻止。",
+        ),
+        _ => ("业务画面暂时不可用", "请检查业务系统状态后重试。"),
+    };
+    let page = format!(
+        concat!(
+            r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">"#,
+            r#"<meta name="viewport" content="width=device-width,initial-scale=1">"#,
+            r#"<title>Showit 演示保护</title><style>"#,
+            r#"body{{margin:0;min-height:100vh;display:grid;place-items:center;"#,
+            r#"font:15px/1.7 system-ui,-apple-system,sans-serif;background:#172533;color:#e8eef4}}"#,
+            r#"main{{max-width:520px;margin:24px;padding:28px 32px;background:#1f2f40;"#,
+            r#"border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.35)}}"#,
+            r#"h1{{font-size:18px;margin:0 0 10px}}p{{margin:0 0 12px;color:#c4d2e0}}"#,
+            r#"code{{font:13px/1.5 ui-monospace,monospace;color:#9fb6cc}}"#,
+            r#"</style></head><body><main><h1>{title}</h1>"#,
+            r#"<p>{description}</p><p>错误码：<code>{code}</code></p></main></body></html>"#
+        ),
+        title = title,
+        description = description,
+        code = code
+    );
+    (
+        status,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        page,
+    )
+        .into_response()
+}
+
+fn request_error(parts: &axum::http::request::Parts, status: StatusCode, code: &'static str) -> Response {
+    let document = parts
+        .headers
+        .get("sec-fetch-dest")
+        .and_then(|value| value.to_str().ok())
+        == Some("document");
+    if document {
+        error_document(status, code)
+    } else {
+        error_response(status, code)
+    }
+}
+
 fn should_forward_header(name: &header::HeaderName) -> bool {
     let value = name.as_str();
     !matches!(
@@ -343,17 +411,23 @@ fn safe_config_header(name: &header::HeaderName) -> bool {
 
 fn rewrite_set_cookie(value: &HeaderValue) -> Option<HeaderValue> {
     let value = value.to_str().ok()?;
+    // The presenter app and this loopback proxy are different sites, so the
+    // business iframe and credentialed probes only receive cookies marked
+    // SameSite=None; browsers require Secure alongside it, which loopback
+    // origins are allowed to set. Strip any conflicting attributes first so
+    // the cookie carries exactly one SameSite/Secure pair.
     let rewritten = value
         .split(';')
         .filter(|part| {
-            !part
-                .trim_start()
-                .to_ascii_lowercase()
-                .starts_with("domain=")
+            let part = part.trim_start();
+            let lower = part.to_ascii_lowercase();
+            !(lower.starts_with("domain=")
+                || lower.starts_with("samesite=")
+                || lower == "secure")
         })
         .collect::<Vec<_>>()
         .join(";");
-    HeaderValue::from_str(&rewritten).ok()
+    HeaderValue::from_str(&format!("{rewritten}; SameSite=None; Secure")).ok()
 }
 
 fn rewrite_origin(value: &HeaderValue, target_origin: &str, proxy_origin: &str) -> HeaderValue {
@@ -398,24 +472,39 @@ fn showit_client_origin(value: &HeaderValue) -> Option<HeaderValue> {
 }
 
 async fn proxy_request(State(state): State<ProxyState>, request: Request) -> Response {
+    let (parts, body) = request.into_parts();
     let Some(config) = state.config.read().await.clone() else {
-        return error_response(
+        return request_error(
+            &parts,
             StatusCode::SERVICE_UNAVAILABLE,
             "SHOWIT_PROXY_NOT_CONFIGURED",
         );
     };
-    let (parts, body) = request.into_parts();
+    // Defeat DNS rebinding: a public domain resolved to this loopback port
+    // would otherwise ride the proxy into the business origin with the
+    // presenter's session. Only the exact loopback Host the iframe uses is
+    // accepted.
+    let expected_host = format!("127.0.0.1:{}", state.port);
+    let host_valid = parts
+        .headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| host.eq_ignore_ascii_case(&expected_host));
+    if !host_valid {
+        return request_error(&parts, StatusCode::FORBIDDEN, "SHOWIT_PROXY_HOST_REJECTED");
+    }
     let client_origin = parts
         .headers
         .get(header::ORIGIN)
         .and_then(showit_client_origin);
     if !write_allowed(&parts.method, parts.uri.path(), &config.allowed_write_paths) {
-        return error_response(StatusCode::FORBIDDEN, "SHOWIT_PRESENTATION_READ_ONLY");
+        return request_error(&parts, StatusCode::FORBIDDEN, "SHOWIT_PRESENTATION_READ_ONLY");
     }
     let body = match to_bytes(body, MAX_REQUEST_BYTES).await {
         Ok(body) => body,
         Err(_) => {
-            return error_response(
+            return request_error(
+                &parts,
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "SHOWIT_PROXY_REQUEST_TOO_LARGE",
             )
@@ -469,14 +558,14 @@ async fn proxy_request(State(state): State<ProxyState>, request: Request) -> Res
     let mut upstream = match upstream.send().await {
         Ok(response) => response,
         Err(_) => {
-            return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_UPSTREAM_UNAVAILABLE")
+            return request_error(&parts, StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_UPSTREAM_UNAVAILABLE")
         }
     };
     if upstream
         .content_length()
         .is_some_and(|length| length > MAX_RESPONSE_BYTES)
     {
-        return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_TOO_LARGE");
+        return request_error(&parts, StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_TOO_LARGE");
     }
     let status = upstream.status();
     let upstream_headers = upstream.headers().clone();
@@ -493,7 +582,7 @@ async fn proxy_request(State(state): State<ProxyState>, request: Request) -> Res
                     .ok()
                     .is_some_and(|url| url.origin().ascii_serialization() != config.target_origin)
             {
-                return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_REDIRECT_BLOCKED");
+                return request_error(&parts, StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_REDIRECT_BLOCKED");
             }
         }
     }
@@ -502,10 +591,10 @@ async fn proxy_request(State(state): State<ProxyState>, request: Request) -> Res
         let chunk = match upstream.chunk().await {
             Ok(Some(chunk)) => chunk,
             Ok(None) => break,
-            Err(_) => return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_INVALID"),
+            Err(_) => return request_error(&parts, StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_INVALID"),
         };
         if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES as usize {
-            return error_response(StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_TOO_LARGE");
+            return request_error(&parts, StatusCode::BAD_GATEWAY, "SHOWIT_PROXY_RESPONSE_TOO_LARGE");
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -568,13 +657,13 @@ async fn proxy_request(State(state): State<ProxyState>, request: Request) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        allowed_url, rewrite_content_security_policy, safe_path, showit_client_origin,
-        write_allowed, ConnectorHeader, ReadonlyProxyService,
+        allowed_url, rewrite_content_security_policy, rewrite_set_cookie, safe_path,
+        showit_client_origin, write_allowed, ConnectorHeader, ReadonlyProxyService,
     };
     use axum::http::{HeaderValue, Method, StatusCode};
     use std::{
         io::{Read, Write},
-        net::{Ipv4Addr, TcpListener},
+        net::{Ipv4Addr, TcpListener, TcpStream},
         sync::mpsc,
         thread,
         time::Duration,
@@ -602,6 +691,22 @@ mod tests {
         ] {
             assert!(showit_client_origin(&HeaderValue::from_static(origin)).is_none());
         }
+    }
+
+    #[test]
+    fn forces_cross_site_cookies_to_samesite_none_and_secure() {
+        let value = HeaderValue::from_static(
+            "session=abc; Path=/; Domain=business.example; Secure; HttpOnly; SameSite=Lax",
+        );
+        assert_eq!(
+            rewrite_set_cookie(&value).unwrap(),
+            "session=abc; Path=/; HttpOnly; SameSite=None; Secure"
+        );
+        let bare = HeaderValue::from_static("token=t");
+        assert_eq!(
+            rewrite_set_cookie(&bare).unwrap(),
+            "token=t; SameSite=None; Secure"
+        );
     }
 
     #[test]
@@ -661,6 +766,86 @@ mod tests {
         assert!(allowed_url("https://example.com/orders").is_some());
         assert!(allowed_url("https://demo:password@example.com/orders").is_none());
         assert!(allowed_url("https://example.com/orders?api_key=private").is_none());
+    }
+
+    #[test]
+    fn keeps_separate_proxy_instances_per_business_origin() {
+        tauri::async_runtime::block_on(async {
+            let proxy = ReadonlyProxyService::start().unwrap();
+            let first = proxy
+                .configure(
+                    "project-multi".to_string(),
+                    "https://one.example.com".to_string(),
+                    "https://one.example.com/app".to_string(),
+                    vec![],
+                    vec![],
+                )
+                .await
+                .unwrap();
+            let second = proxy
+                .configure(
+                    "project-multi".to_string(),
+                    "https://two.example.com".to_string(),
+                    "https://two.example.com/app".to_string(),
+                    vec![],
+                    vec![],
+                )
+                .await
+                .unwrap();
+            // Alternating pages between two connectors must not evict the
+            // other origin's listener (and with it its cookie jar).
+            let first_again = proxy
+                .configure(
+                    "project-multi".to_string(),
+                    "https://one.example.com".to_string(),
+                    "https://one.example.com/other".to_string(),
+                    vec![],
+                    vec![],
+                )
+                .await
+                .unwrap();
+            let port = |url: &str| url.rsplit_once(':').map(|(_, rest)| rest.split('/').next().unwrap_or("").to_string()).unwrap_or_default();
+            assert_ne!(port(&first.url), port(&second.url));
+            assert_eq!(port(&first.url), port(&first_again.url));
+            assert_eq!(proxy.instances.lock().await.len(), 2);
+            proxy.clear("project-multi").await;
+            assert!(proxy.instances.lock().await.is_empty());
+        });
+    }
+
+    #[test]
+    fn rejects_requests_with_a_rebound_public_host() {
+        let upstream = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        upstream.set_nonblocking(false).unwrap();
+        let upstream_origin = format!("http://{}", upstream.local_addr().unwrap());
+
+        tauri::async_runtime::block_on(async {
+            let proxy = ReadonlyProxyService::start().unwrap();
+            let target = proxy
+                .configure(
+                    "project-rebind".to_string(),
+                    upstream_origin.clone(),
+                    format!("{upstream_origin}/orders"),
+                    vec![],
+                    vec![],
+                )
+                .await
+                .unwrap();
+            let port = reqwest::Url::parse(&target.url)
+                .unwrap()
+                .port()
+                .unwrap();
+            let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let request = format!(
+                "GET /orders HTTP/1.1\r\nHost: attacker.example:{port}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(request.as_bytes()).unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+            assert!(response.contains("SHOWIT_PROXY_HOST_REJECTED"));
+        });
     }
 
     #[test]
@@ -760,6 +945,23 @@ mod tests {
                 .await
                 .unwrap()
                 .contains("SHOWIT_PRESENTATION_READ_ONLY"));
+            let blocked_document = client
+                .post(&target.url)
+                .header("Sec-Fetch-Dest", "document")
+                .body("write")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(blocked_document.status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                blocked_document.headers().get("content-type").unwrap(),
+                "text/html; charset=utf-8"
+            );
+            assert!(blocked_document
+                .text()
+                .await
+                .unwrap()
+                .contains("写入请求已被演示保护拦截"));
         });
         let request = request_rx
             .recv_timeout(Duration::from_secs(3))

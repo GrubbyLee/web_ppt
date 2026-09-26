@@ -32,7 +32,7 @@ describe("project contract", () => {
       status: "draft",
       totalPlannedSeconds: 60,
       autoAdvanceEnabled: false,
-      layout: { stagePercent: 68, preset: "stage", noteFontScale: 1 },
+      layout: { stagePercent: 56, preset: "stage", noteFontScale: 1 },
       connectors: [],
       pages: []
     });
@@ -48,7 +48,7 @@ describe("project contract", () => {
       status: "draft",
       totalPlannedSeconds: 60,
       autoAdvanceEnabled: false,
-      layout: { stagePercent: 68, preset: "stage", noteFontScale: 1 },
+      layout: { stagePercent: 56, preset: "stage", noteFontScale: 1 },
       connectors: [],
       pages: [{
         id: "page",
@@ -81,7 +81,7 @@ describe("project contract", () => {
       status: "draft",
       totalPlannedSeconds: 60,
       autoAdvanceEnabled: false,
-      layout: { stagePercent: 68, preset: "stage", noteFontScale: 1 },
+      layout: { stagePercent: 56, preset: "stage", noteFontScale: 1 },
       connectors: [],
       pages: [{
         id: "page",
@@ -144,6 +144,7 @@ describe("connector contract", () => {
     expect(connector.securityMode).toBe("interactive");
     expect(connector.loginPaths).toEqual([]);
     expect(connector.logoutPaths).toEqual([]);
+    expect(connector.roleSwitchPaths).toEqual([]);
     expect(connector.environment).toBe("默认环境");
     expect(connector.requestHeaders).toEqual([]);
   });
@@ -162,8 +163,10 @@ describe("connector contract", () => {
   it("rejects ambiguous or traversing login and logout paths", () => {
     for (const path of ["login", "//evil.example/login", "/login?next=/admin", "/login#callback", "/a/../login", "/a/%2e%2e/login", "/a\\login"]) {
       expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, loginPaths: [path] }).success, path).toBe(false);
+      expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, roleSwitchPaths: [path] }).success, path).toBe(false);
     }
     expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, loginPaths: ["/login", "/sso/callback"] }).success).toBe(true);
+    expect(PresentationConnectorSchema.safeParse({ ...legacyConnector, roleSwitchPaths: ["/api/role/switch"] }).success).toBe(true);
   });
 
   it("supports configurable session and role probes without accepting unsafe paths or fields", () => {

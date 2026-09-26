@@ -14,13 +14,16 @@ function escapeMarkdownLiteral(value: string): string {
 }
 
 function variableMap(project: Project, page: PresentationPage): Map<string, string> {
-  const values = new Map<string, string>([
-    ["role", page.role],
-    ["page.id", page.id],
-    ["page.title", page.title]
-  ]);
+  // Built-in tokens win over same-named page variables: role, page.id,
+  // page.title, page.businessLabel and page.url are reserved platform tokens.
+  const values = new Map<string, string>();
   for (const variable of project.variables) values.set(`project.${variable.key}`, variable.value);
   for (const variable of page.variables) values.set(`page.${variable.key}`, variable.value);
+  values.set("role", page.role);
+  values.set("page.id", page.id);
+  values.set("page.title", page.title);
+  values.set("page.businessLabel", page.businessLabel);
+  values.set("page.url", page.url ?? "");
   return values;
 }
 

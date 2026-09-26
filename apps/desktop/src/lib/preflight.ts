@@ -99,6 +99,16 @@ export function runProjectPreflight(project: Project): PreflightReport {
     if (!page.script.markdown.trim()) {
       items.push({ id: `markdown-${page.id}`, state: "error", pageId: page.id, message: `${page.title}：Markdown 脚本为空。` });
     }
+    const stepIds = new Set<string>();
+    for (const step of page.script.steps) {
+      if (stepIds.has(step.id)) {
+        items.push({ id: `step-id-${page.id}-${step.id}`, state: "error", pageId: page.id, message: `${page.title}：步骤 ID 重复：${step.id}` });
+      }
+      stepIds.add(step.id);
+      if (step.risk === "high" && !step.expectedCondition) {
+        items.push({ id: `high-risk-unverified-${page.id}-${step.id}`, state: "warn", pageId: page.id, message: `${page.title}：高风险步骤“${step.text.slice(0, 20)}”未配置完成条件，演示时需人工确认后才能继续。` });
+      }
+    }
     if (page.offline && !isOfflineFallbackReady(page.offline)) {
       items.push({ id: `offline-${page.id}`, state: "error", pageId: page.id, message: `${page.title}：离线备用内容尚未上传或填写。` });
     }
@@ -143,6 +153,14 @@ export function runProjectPreflight(project: Project): PreflightReport {
     if (page.connectorId && !connector) {
       items.push({ id: `connector-${page.id}`, state: "error", pageId: page.id, message: `${page.title}：引用的连接器不存在。` });
     }
+    if (!page.connectorId && page.url) {
+      items.push({
+        id: `connector-unset-${page.id}`,
+        state: "warn",
+        pageId: page.id,
+        message: `${page.title}：未选择连接器，演示时将回退到第一个连接器（当前共 ${project.connectors.length} 个）。`
+      });
+    }
     if (connector?.sessionProbe && connector.sessionProbe.roleMappings.length > 0 && !connectorRoleMappings.get(connector.id)?.has(page.role)) {
       items.push({ id: `session-role-${page.id}`, state: "warn", pageId: page.id, message: `${page.title}：连接器已启用角色检查，但未配置“${page.role}”的业务角色映射；本页只检查登录状态。` });
     }
@@ -173,7 +191,11 @@ export function runProjectPreflight(project: Project): PreflightReport {
           : { id: `protection-${page.id}`, state: "error", pageId: page.id, message: `${page.title}：请求保护仅能用于扩展标签模式。` });
       }
       if (connector.securityMode === "readonly-proxy") {
-        items.push({ id: `readonly-proxy-${page.id}`, state: "ok", pageId: page.id, message: `${page.title}：将通过本机只读代理加载，写请求默认拦截。` });
+        if (actualOrigin && actualOrigin !== normalizedOrigin(connector.origin)) {
+          items.push({ id: `readonly-proxy-origin-${page.id}`, state: "error", pageId: page.id, message: `${page.title}：本机只读代理仅代理连接器主 Origin（${connector.origin}），该页面的业务 URL 指向其他域名，演示时将无法加载。` });
+        } else {
+          items.push({ id: `readonly-proxy-${page.id}`, state: "ok", pageId: page.id, message: `${page.title}：将通过本机只读代理加载，写请求默认拦截。` });
+        }
       }
     }
   }

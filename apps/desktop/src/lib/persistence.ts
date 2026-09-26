@@ -68,6 +68,7 @@ export type BusinessUrlHealth = {
   elapsedMs: number;
   error: string | null;
   mode: "tauri" | "browser";
+  title?: string | null;
 };
 
 export type BrowserProfileStatus = { exists: boolean; bytes: number };
@@ -128,14 +129,15 @@ export async function checkBusinessUrl(url: string): Promise<BusinessUrlHealth> 
   const timeout = window.setTimeout(() => controller.abort(), 8_000);
   try {
     const response = await fetch(url, { method: "GET", credentials: "omit", cache: "no-store", signal: controller.signal });
-    return { ok: response.ok, status: response.status, elapsedMs: Math.round(performance.now() - started), error: null, mode: "browser" };
+    return { ok: response.ok, status: response.status, elapsedMs: Math.round(performance.now() - started), error: null, mode: "browser", title: null };
   } catch (error) {
     return {
       ok: false,
       status: null,
       elapsedMs: Math.round(performance.now() - started),
       error: error instanceof DOMException && error.name === "AbortError" ? "业务页面加载超时" : "浏览器开发模式受跨域策略限制",
-      mode: "browser"
+      mode: "browser",
+      title: null
     };
   } finally {
     window.clearTimeout(timeout);
@@ -208,8 +210,9 @@ export async function listWorkspaces(): Promise<Workspace[]> {
         });
         return migrated;
       }
-    } catch {
+    } catch (error) {
       // Browser storage remains a recovery path if desktop persistence is unavailable.
+      recordDiagnostic("桌面项目列表读取失败，已回退浏览器缓存", error);
     }
   }
 
@@ -235,8 +238,9 @@ export async function loadWorkspace(projectId?: string): Promise<Workspace | nul
         }
         return migrated;
       }
-    } catch {
+    } catch (error) {
       // Browser storage remains a recovery path if desktop persistence is unavailable.
+      recordDiagnostic("桌面项目读取失败，已回退浏览器缓存", error);
     }
   }
 
@@ -294,6 +298,7 @@ export async function configureReadonlyProxy(projectId: string, connector: Prese
     pageUrl,
     loginPaths: connector.loginPaths,
     logoutPaths: connector.logoutPaths,
+    roleSwitchPaths: connector.roleSwitchPaths,
     requestHeaders: connector.requestHeaders
   });
   return target.url;
@@ -359,9 +364,9 @@ export async function listProjectVersions(projectId: string): Promise<ProjectVer
   }).filter((version) => version.projectId === projectId).sort((a, b) => b.version - a.version);
 }
 
-export async function createProjectSnapshot(project: Project, changeSummary: string, kind: ProjectVersion["kind"]): Promise<ProjectVersion> {
+export async function createProjectSnapshot(project: Project, changeSummary: string, kind: ProjectVersion["kind"], publishedBy = ""): Promise<ProjectVersion> {
   if (inTauri()) {
-    const value = await invoke<unknown>("publish_project_version", { project, changeSummary, kind });
+    const value = await invoke<unknown>("publish_project_version", { project, changeSummary, kind, publishedBy });
     return ProjectVersionSchema.parse(value);
   }
   const versions = parseStoredArray(VERSION_STORAGE_KEY, (value) => {
@@ -375,6 +380,7 @@ export async function createProjectSnapshot(project: Project, changeSummary: str
     version: nextVersion,
     kind,
     createdAt: Date.now(),
+    publishedBy: publishedBy.trim().slice(0, 120),
     changeSummary,
     snapshot: project
   };
@@ -384,8 +390,8 @@ export async function createProjectSnapshot(project: Project, changeSummary: str
   return version;
 }
 
-export function publishProjectVersion(project: Project, changeSummary = "发布项目"): Promise<ProjectVersion> {
-  return createProjectSnapshot(project, changeSummary, "publish");
+export function publishProjectVersion(project: Project, changeSummary = "发布项目", publishedBy = ""): Promise<ProjectVersion> {
+  return createProjectSnapshot(project, changeSummary, "publish", publishedBy);
 }
 
 export async function listRehearsals(projectId: string): Promise<Rehearsal[]> {

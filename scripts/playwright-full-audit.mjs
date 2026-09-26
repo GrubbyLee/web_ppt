@@ -88,6 +88,10 @@ try {
   const administrator = accounts.find((account) => account.role === "admin");
   assert.ok(administrator);
   assert.equal((await context.request.post(`${appUrl}/api/lc/v1/auth/login`, { data: administrator })).status(), 200);
+  // The stage loaded before login, so its frame still shows the anonymous
+  // console — reload it once (as a presenter would) before walking pages.
+  await page.getByTitle("刷新业务画面").click();
+  await page.getByText("角色就绪", { exact: false }).first().waitFor({ state: "visible" });
 
   await check("演讲者提词模式", async () => {
     await page.keyboard.press("p");

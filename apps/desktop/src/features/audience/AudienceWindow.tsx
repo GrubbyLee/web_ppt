@@ -45,7 +45,8 @@ function AudienceBusinessPage({ project, page }: { project: Project; page: Prese
     connector?.sandboxPermissions,
     connector?.requestHeaders,
     connector?.loginPaths,
-    connector?.logoutPaths
+    connector?.logoutPaths,
+    connector?.roleSwitchPaths
   ]);
 
   useEffect(() => {
@@ -107,6 +108,17 @@ export function AudienceWindow() {
     return () => channel.close();
   }, [sessionId]);
 
+  // The presenter expires its laser locally; without the same rule here a dot
+  // would linger on the audience screen after the presenter stops moving it.
+  const laser = state?.session.laser ?? null;
+  useEffect(() => {
+    if (!laser) return;
+    const timer = window.setTimeout(() => {
+      setState((current) => current?.session.laser ? { ...current, session: { ...current.session, laser: null } } : current);
+    }, Math.max(0, laser.expiresAt - Date.now()) + 50);
+    return () => window.clearTimeout(timer);
+  }, [laser]);
+
   if (!state) {
     return <main className="audience-window" aria-label="Showit 观众屏"><section className="audience-cover audience-cover--privacy"><strong>等待演讲者连接</strong><span>此窗口会在演示开始后自动同步画面。</span></section></main>;
   }
@@ -119,7 +131,7 @@ export function AudienceWindow() {
       {page?.pageType === "end" ? null : offlineActive ? <OfflineFallback fallback={page?.offline} label={state.project.brand.offlineLabel} executeScripts={false} /> : page ? <AudienceBusinessPage project={state.project} page={page} /> : null}
       <AnnotationLayer circles={state.session.circles} laser={state.session.laser} interactive={false} />
       {page ? <PrivacyMaskLayer masks={page.privacyMasks} /> : null}
-      {state.session.screenMode === "frozen" ? <aside className="audience-freeze-indicator" role="status">画面已冻结</aside> : state.session.screenMode !== "normal" || page?.pageType === "end" ? (
+      {state.session.screenMode === "frozen" ? <><div className="audience-freeze-dim" aria-hidden="true" /><aside className="audience-freeze-indicator" role="status">画面已冻结</aside></> : state.session.screenMode !== "normal" || page?.pageType === "end" ? (
         <section className={`audience-cover audience-cover--${page?.pageType === "end" ? "ended" : state.session.screenMode}`}>
           <strong>{state.session.screenMode === "ended" || page?.pageType === "end" ? state.project.brand.endTitle : state.session.screenMode === "privacy" ? state.project.brand.privacyMessage : screenModeLabel(state.session.screenMode)}</strong>
           <span>{state.session.screenMode === "ended" || page?.pageType === "end" ? state.project.brand.endDescription : state.session.screenMode === "privacy" ? state.project.brand.loadingMessage : page?.businessLabel ?? "等待演讲者恢复画面"}</span>

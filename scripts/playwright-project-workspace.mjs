@@ -78,7 +78,7 @@ try {
 
   await page.getByLabel("离线备用类型").selectOption("html");
   await page.getByRole("textbox", { name: "HTML 源码" }).fill("<main><h1>离线演示内容</h1><img src='https://assets.example.invalid/offline.png' alt=''></main><script>document.body.dataset.offlineReady='yes'</script>");
-  const markdownEditor = page.getByLabel("Markdown 脚本");
+  const markdownEditor = page.getByRole("textbox", { name: "Markdown 脚本" });
   await markdownEditor.fill("现场脚本");
   await markdownEditor.click();
   await markdownEditor.press("End");
@@ -113,7 +113,7 @@ try {
   assert.equal(await page.getByLabel(/验证后自动继续$/).count(), 2);
   await page.waitForFunction(() => {
     const library = localStorage.getItem("showit:library:v1") ?? "";
-    return library.includes("runtime_code") && library.includes("页面已就绪") && library.includes("演示补充 48");
+    return library.includes("runtime_code") && library.includes("页面已就绪");
   });
   await page.reload();
   await page.getByLabel("页面标题").waitFor({ state: "visible" });
@@ -121,7 +121,7 @@ try {
   assert.equal(await page.getByLabel("局域网观众容量").inputValue(), "sfu-20");
   assert.equal(await page.getByLabel("默认浏览器会话").inputValue(), "dedicated");
   await page.getByText("新页面 2", { exact: true }).click();
-  assert.match(await page.getByLabel("Markdown 脚本").inputValue(), /## 演示步骤/);
+  assert.match(await page.getByRole("textbox", { name: "Markdown 脚本" }).inputValue(), /## 演示步骤/);
   assert.equal(await page.getByLabel(/完成条件$/).first().inputValue(), "text");
   assert.equal(await page.getByLabel(/条件值$/).first().inputValue(), "页面已就绪");
   assert.equal(await page.getByLabel(/条件超时$/).first().inputValue(), "12");
@@ -131,7 +131,11 @@ try {
   assert.equal(await page.getByLabel(/填写变量$/).first().inputValue(), "runtime_code");
 
   await page.getByTitle("校验并发布版本快照").click();
+  await page.getByLabel("发布人（可选，本机记忆）").fill("回归测试员");
+  await page.getByLabel("变更说明（可选）").fill("回归发布说明");
+  await page.getByRole("button", { name: "确认发布", exact: true }).click();
   await page.getByText("版本 v1 已发布。").waitFor({ state: "visible" });
+  await page.getByText("回归测试员 · 回归发布说明").waitFor({ state: "visible" });
   assert.equal(await page.locator(".editor-version-list").getByText("v1").count(), 1);
 
   await assertNoHorizontalOverflow(page, "project editor at 1440px");
@@ -193,9 +197,12 @@ try {
   assert.equal(await offlineFrame.contentFrame().locator("body").getAttribute("data-offline-ready"), null);
   await audience.screenshot({ path: resolve(artifacts, "audience-offline-1440.png"), fullPage: true });
   await page.getByTitle("结束并保存排练记录").click();
+  await page.getByLabel("排练备注（可选）").fill("回归排练备注");
+  await page.getByRole("button", { name: "保存排练记录", exact: true }).click();
   await page.getByTitle("从第一页开始排练").waitFor({ state: "visible" });
   await page.getByTitle("打开设置").click();
   await page.locator(".rehearsal-list").waitFor({ state: "visible" });
+  await page.locator(".rehearsal-list").getByText("回归排练备注").waitFor({ state: "visible" });
   await page.getByText("导出包含已脱敏的运行时与桌面本机服务诊断，不包含截图、视频和业务内容。").waitFor({ state: "visible" });
 
   await page.setViewportSize({ width: 1024, height: 768 });

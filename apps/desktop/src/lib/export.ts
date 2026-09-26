@@ -35,14 +35,19 @@ export function downloadMarkdownScript(project: Project, pageId: string): void {
   downloadTextFile(`${fileSafeName(project.name)}-${String(page.order + 1).padStart(2, "0")}.md`, redactSensitiveText(page.script.markdown), "text/markdown;charset=utf-8");
 }
 
-export function downloadPreflightReport(project: Project, report: PreflightReport): void {
+export function downloadPreflightReport(
+  project: Project,
+  report: PreflightReport,
+  healthItems: Array<{ id: string; state: "ok" | "warn" | "error"; message: string }> = []
+): void {
   const content = JSON.stringify({
     generatedAt: new Date().toISOString(),
     project: { id: project.id, name: project.name, pages: project.pages.length },
     canPublish: report.canPublish,
     errors: report.errors.length,
     warnings: report.warnings.length,
-    items: report.items.map(({ id, state, message, pageId }) => ({ id, state, message: redactSensitiveText(message), pageId }))
+    items: report.items.map(({ id, state, message, pageId }) => ({ id, state, message: redactSensitiveText(message), pageId })),
+    healthChecks: healthItems.map(({ id, state, message }) => ({ id, state, message: redactSensitiveText(message) }))
   }, null, 2);
   downloadTextFile(`${fileSafeName(project.name)}-preflight.json`, content, "application/json;charset=utf-8");
 }
@@ -58,6 +63,7 @@ export function downloadRehearsalReport(project: Project, rehearsal: Rehearsal):
     ["开始时间", new Date(rehearsal.startedAt).toLocaleString("zh-CN")],
     ["结束时间", new Date(rehearsal.endedAt).toLocaleString("zh-CN")],
     ["总耗时（毫秒）", rehearsal.totalElapsedMs],
+    ["排练备注", redactSensitiveText(rehearsal.note)],
     [],
     ["页码", "页面", "计划毫秒", "实际毫秒", "差值毫秒"]
   ];

@@ -214,7 +214,11 @@ async function configureRequestProtection(message) {
   const sessionId = typeof message.sessionId === "string" ? message.sessionId : "";
   const origin = typeof message.origin === "string" && isAllowedOrigin(message.origin) ? new URL(message.origin).origin : null;
   const securityMode = message.securityMode === "request-protection" ? "request-protection" : "interactive";
-  const allowedPaths = sanitizeProtectionPaths([...(Array.isArray(message.loginPaths) ? message.loginPaths : []), ...(Array.isArray(message.logoutPaths) ? message.logoutPaths : [])]);
+  const allowedPaths = sanitizeProtectionPaths([
+    ...(Array.isArray(message.loginPaths) ? message.loginPaths : []),
+    ...(Array.isArray(message.logoutPaths) ? message.logoutPaths : []),
+    ...(Array.isArray(message.roleSwitchPaths) ? message.roleSwitchPaths : [])
+  ]);
   const removeRuleIds = await currentProtectionRuleIds();
   if (!origin || securityMode === "interactive") {
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds });
@@ -222,7 +226,15 @@ async function configureRequestProtection(message) {
     return;
   }
 
-  const addRules = buildProtectionRules(origin, allowedPaths);
+  // Extra allowedOrigins join the write-block surface so API hosts listed by
+  // the connector cannot carry demo-time writes that bypass the main origin.
+  const protectedOrigins = [...new Set([
+    origin,
+    ...(Array.isArray(message.allowedOrigins) ? message.allowedOrigins : [])
+      .filter((value) => typeof value === "string" && isAllowedOrigin(value))
+      .map((value) => new URL(value).origin)
+  ])];
+  const addRules = buildProtectionRules(protectedOrigins, allowedPaths);
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds, addRules });
   sendNative({ type: "request-protection-state", sessionId, enabled: true, origin, allowedPaths: allowedPaths.length });
 }

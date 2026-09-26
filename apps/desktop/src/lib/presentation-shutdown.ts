@@ -68,7 +68,8 @@ export async function shutdownPresentationRuntime(
       origin: "",
       securityMode: "interactive",
       loginPaths: [],
-      logoutPaths: []
+      logoutPaths: [],
+      roleSwitchPaths: []
     }), failures),
     attempt("停止扩展观众投送", () => services.sendExtension({
       type: "audience-share",

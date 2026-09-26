@@ -36,6 +36,7 @@ type SettingsDrawerProps = {
   onLayoutPreset: (preset: Project["layout"]["preset"]) => void;
   onStagePercent: (value: number) => void;
   onScreenMode: (mode: ScreenMode) => void;
+  scrollToPreflight?: boolean;
 };
 
 const screenModes: ScreenMode[] = ["normal", "black", "white", "frozen", "privacy", "ended"];
@@ -63,9 +64,17 @@ export function SettingsDrawer({
   onBrowserSessionMode,
   onLayoutPreset,
   onStagePercent,
-  onScreenMode
+  onScreenMode,
+  scrollToPreflight = false
 }: SettingsDrawerProps) {
   const preflight = useMemo(() => runProjectPreflight(project), [project]);
+  useEffect(() => {
+    if (!open || !scrollToPreflight) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById("settings-preflight")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [open, scrollToPreflight]);
   const [healthItems, setHealthItems] = useState<Array<{ id: string; state: "ok" | "warn" | "error"; message: string }>>([]);
   const [healthChecking, setHealthChecking] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticEntry[]>([]);
@@ -92,7 +101,8 @@ export function SettingsDrawer({
           const health = await checkBusinessUrl(resolved.value);
           const state = health.ok ? "ok" as const : health.mode === "browser" && health.status === null ? "warn" as const : "error" as const;
           const result = health.status !== null ? `HTTP ${health.status} · ${health.elapsedMs} ms` : health.error ?? "无法连接";
-          items[index] = { id: page.id, state, message: `${page.title}：${result}` };
+          const title = health.title ? ` · ${health.title}` : "";
+          items[index] = { id: page.id, state, message: `${page.title}：${result}${title}` };
         }
       }
       if (healthRun.current === runId) await checkNext();
@@ -200,7 +210,7 @@ export function SettingsDrawer({
         />
         <label className="settings-row">
           <span>业务区宽度</span>
-          <InputNumber min={50} max={75} value={project.layout.stagePercent} addonAfter="%" onChange={(value) => onStagePercent(Number(value ?? 68))} />
+          <InputNumber min={50} max={66} value={Math.min(66, Math.max(50, project.layout.stagePercent))} addonAfter="%" onChange={(value) => onStagePercent(Number(value ?? 56))} />
         </label>
       </section>
 
@@ -275,10 +285,10 @@ export function SettingsDrawer({
         ) : null}
       </section>
 
-      <section className="settings-section">
+      <section className="settings-section" id="settings-preflight">
         <h2>
           <ShieldCheck size={16} /> 演前检查
-          <button type="button" aria-label="导出演前记录" title="导出演前记录" onClick={() => downloadPreflightReport(project, preflight)}><Download size={14} /></button>
+          <button type="button" aria-label="导出演前记录" title="导出演前记录" onClick={() => downloadPreflightReport(project, preflight, healthItems)}><Download size={14} /></button>
         </h2>
         <ul className="preflight-list">
           {preflight.items.map((item) => <li key={item.id} data-state={item.state}>{item.message}</li>)}
@@ -315,6 +325,10 @@ export function SettingsDrawer({
             <dd>激光笔、圈选、清除标注</dd>
           </div>
           <div>
+            <dt>P</dt>
+            <dd>提词模式（大字号脚本）</dd>
+          </div>
+          <div>
             <dt>B / W / F</dt>
             <dd>黑屏、白屏、冻结</dd>
           </div>
@@ -347,7 +361,7 @@ export function SettingsDrawer({
           <div className="rehearsal-list">
             {rehearsals.slice(0, 5).map((rehearsal) => {
               const overrunPages = rehearsal.pages.filter((page) => page.actualMs > page.plannedMs).length;
-              return <div key={rehearsal.id}><span>{new Date(rehearsal.endedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span><strong>{formatDuration(rehearsal.totalElapsedMs)}</strong><small>{overrunPages} 页超时</small><button type="button" aria-label="导出排练报告" title="导出排练报告" onClick={() => downloadRehearsalReport(project, rehearsal)}><Download size={14} /></button></div>;
+              return <div key={rehearsal.id}><span>{new Date(rehearsal.endedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span><strong>{formatDuration(rehearsal.totalElapsedMs)}</strong><small>{overrunPages} 页超时</small><button type="button" aria-label="导出排练报告" title="导出排练报告" onClick={() => downloadRehearsalReport(project, rehearsal)}><Download size={14} /></button>{rehearsal.note ? <p className="rehearsal-note">{rehearsal.note}</p> : null}</div>;
             })}
           </div>
         )}
