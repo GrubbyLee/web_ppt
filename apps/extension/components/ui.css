@@ -1,0 +1,331 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ink-950: #0d1015;
+  --ink-900: #12171e;
+  --ink-850: #161c24;
+  --ink-800: #1b232d;
+  --ink-750: #222c38;
+  --line-700: #303b49;
+  --line-600: #415062;
+  --muted-400: #91a0b0;
+  --muted-300: #b9c4cf;
+  --paper-50: #f5f8fb;
+  --paper-100: #e9eff4;
+  --signal-teal: #37d0ba;
+  --signal-blue: #82a7ff;
+  --signal-amber: #f4b44d;
+  --signal-red: #ff5f6d;
+  --signal-green: #55d998;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  color: var(--paper-50);
+  background: var(--ink-950);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--signal-blue);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- toolbar button ---- */
+
+.toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-700);
+  border-radius: 7px;
+  background: var(--ink-800);
+  color: var(--paper-100);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar-button:hover:not(:disabled) {
+  border-color: var(--line-600);
+  background: var(--ink-750);
+}
+
+.toolbar-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.toolbar-button--primary {
+  background: var(--signal-teal);
+  border-color: var(--signal-teal);
+  color: #06251f;
+  font-weight: 600;
+}
+
+.toolbar-button--primary:hover:not(:disabled) {
+  background: #4adcc7;
+}
+
+.toolbar-button--danger {
+  color: var(--signal-red);
+  border-color: rgb(255 95 109 / 40%);
+}
+
+.toolbar-button--danger:hover:not(:disabled) {
+  background: rgb(255 95 109 / 12%);
+}
+
+.toolbar-button.is-active {
+  border-color: var(--signal-teal);
+  color: var(--signal-teal);
+}
+
+.toolbar-button__label {
+  font-size: 13px;
+}
+
+/* ---- form fields ---- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field > span {
+  font-size: 12px;
+  color: var(--muted-400);
+}
+
+.field input,
+.field textarea,
+.field select {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-700);
+  border-radius: 7px;
+  background: var(--ink-900);
+  color: var(--paper-50);
+}
+
+.field textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+/* ---- dialog ---- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(5 6 7 / 65%);
+  z-index: 100;
+}
+
+.dialog {
+  width: min(440px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line-700);
+  border-radius: 12px;
+  background: var(--ink-850);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 50%);
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.dialog p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-300);
+  overflow-wrap: anywhere;
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- markdown ---- */
+
+.markdown-view {
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.markdown-view :is(h1, h2, h3, h4) {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.3;
+}
+
+.markdown-view h1 {
+  font-size: 1.25em;
+}
+
+.markdown-view h2 {
+  font-size: 1.12em;
+}
+
+.markdown-view h3 {
+  font-size: 1em;
+}
+
+.markdown-view p {
+  margin: 0.45em 0;
+}
+
+.markdown-view ul,
+.markdown-view ol {
+  margin: 0.45em 0;
+  padding-left: 1.4em;
+}
+
+.markdown-view :is(ul, ol) :is(ul, ol) {
+  margin: 0.15em 0;
+}
+
+.markdown-view code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--ink-800);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.markdown-view pre {
+  overflow: auto;
+  background: var(--ink-900);
+  border: 1px solid var(--line-700);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.markdown-view pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-view blockquote {
+  margin: 0.5em 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--signal-teal);
+  color: var(--muted-300);
+}
+
+.markdown-view table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+}
+
+.markdown-view :is(th, td) {
+  border: 1px solid var(--line-700);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.markdown-view img {
+  max-width: 100%;
+}
+
+.markdown-view a {
+  color: var(--signal-teal);
+}
+
+/* ---- offline fallback ---- */
+
+.offline-fallback {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--ink-950);
+}
+
+.offline-fallback :is(img, video) {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.offline-fallback iframe {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.offline-fallback > span {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(5 6 7 / 70%);
+  color: var(--signal-amber);
+  font-size: 12px;
+}

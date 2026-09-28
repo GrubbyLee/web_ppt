@@ -1,0 +1,141 @@
+.stage-root {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--ink-950);
+}
+
+.stage-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 10;
+}
+
+.stage-cover--black {
+  background: #050607;
+}
+
+.stage-cover--white {
+  background: #fff;
+}
+
+.stage-cover--privacy {
+  background: #172533;
+  color: var(--paper-100);
+  font-size: clamp(20px, 3vw, 34px);
+  font-weight: 600;
+}
+
+.stage-cover--ended {
+  background: #172533;
+  color: var(--paper-50);
+  text-align: center;
+  padding: 32px;
+}
+
+.stage-cover--ended img {
+  max-width: 180px;
+  max-height: 120px;
+  object-fit: contain;
+}
+
+.stage-cover--ended h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 52px);
+}
+
+.stage-cover--ended p {
+  margin: 0;
+  color: var(--muted-300);
+  font-size: clamp(14px, 1.6vw, 20px);
+}
+
+.stage-slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6vh 8vw 12vh;
+  text-align: center;
+}
+
+.stage-slide__logo {
+  max-width: 200px;
+  max-height: 110px;
+  object-fit: contain;
+}
+
+.stage-slide__section {
+  color: var(--brand, var(--signal-teal));
+  font-size: clamp(13px, 1.4vw, 18px);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.stage-slide h1 {
+  margin: 0;
+  max-width: 22ch;
+  font-size: clamp(30px, 5vw, 64px);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.stage-slide__label {
+  padding: 4px 14px;
+  border: 1px solid var(--line-600);
+  border-radius: 999px;
+  color: var(--muted-300);
+  font-size: clamp(12px, 1.2vw, 16px);
+}
+
+.stage-slide p {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--muted-300);
+  font-size: clamp(14px, 1.6vw, 20px);
+  line-height: 1.6;
+}
+
+.stage-slide footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+}
+
+.stage-annotations {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.stage-annotation-circle {
+  position: absolute;
+  border: 4px solid var(--signal-amber);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgb(5 6 7 / 55%);
+}
+
+.stage-annotation-laser {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--signal-red);
+  box-shadow: 0 0 20px 8px rgb(255 95 109 / 55%);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 120ms linear;
+}

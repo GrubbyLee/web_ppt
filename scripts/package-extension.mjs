@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const source = resolve(root, "apps/extension/dist");
-const version = process.env.npm_package_version ?? "0.1.0";
-const output = resolve(root, `apps/extension/release/Showit_Controller_${version}.zip`);
+const source = resolve(root, "apps/extension/.output/chrome-mv3");
+const version = process.env.npm_package_version ?? "0.2.0";
+const output = resolve(root, `apps/extension/release/Showit_Extension_${version}.zip`);
 const files = {};
 
 async function collect(directory) {
@@ -21,7 +21,7 @@ async function collect(directory) {
 }
 
 await collect(source);
-if (!files["manifest.json"] || !files["sidepanel.js"]) throw new Error("扩展构建产物不完整");
+if (!files["manifest.json"] || !files["sidepanel.html"] || !files["business-tab.js"]) throw new Error("扩展构建产物不完整");
 const archive = zipSync(files, { level: 9 });
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, archive);

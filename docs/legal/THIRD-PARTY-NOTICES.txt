@@ -1,12 +1,28 @@
-Showit includes the following components for local SFU audience delivery:
+Showit v0.2 不再分发二进制第三方组件。扩展构建产物中包含以下开源软件的编译输出：
 
-LiveKit Server v1.13.6
-Copyright 2024 LiveKit, Inc.
-https://github.com/livekit/livekit
+React 19
+Copyright Meta Platforms, Inc. and affiliates
+https://react.dev
+Licensed under the MIT License.
 
-LiveKit JavaScript Client v2.22.3
-Copyright 2024 LiveKit, Inc.
-https://github.com/livekit/client-sdk-js
+react-markdown / remark / unified 生态（remark-gfm、rehype-sanitize）
+Copyright Titus Wormer and contributors
+https://github.com/remarkjs
+Licensed under the MIT License.
 
-Both components are licensed under the Apache License, Version 2.0.
-The complete license text is included in APACHE-2.0.txt.
+lucide-react 图标
+Copyright Lucide Icons contributors
+https://lucide.dev
+Licensed under the ISC License.
+
+WXT 扩展框架（构建期依赖，不分发运行时代码）
+Copyright WXT contributors
+https://wxt.dev
+Licensed under the MIT License.
+
+zod
+Copyright Colin McDonnell
+https://zod.dev
+Licensed under the MIT License.
+
+fflate、hash-wasm 及其他构建期依赖的完整清单见根目录 package-lock.json。

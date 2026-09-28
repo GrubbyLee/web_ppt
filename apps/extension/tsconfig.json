@@ -1,10 +1,42 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "./.wxt/tsconfig.json",
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": false,
-    "noEmit": true,
-    "types": ["chrome", "node"]
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@showit/contracts": ["../../packages/contracts/src/index.ts"],
+      "@/lib/*": ["./lib/*"],
+      "@/session/*": ["./session/*"],
+      "@/messaging/*": ["./messaging/*"],
+      "@/components/*": ["./components/*"]
+    }
   },
-  "include": ["*.js", "vite.config.ts"]
+  "include": [
+    ".wxt/wxt.d.ts",
+    "entrypoints/**/*.ts",
+    "entrypoints/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "session/**/*.ts",
+    "messaging/**/*.ts",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "vitest.config.ts",
+    "../../packages/contracts/src/index.ts"
+  ],
+  "exclude": ["node_modules", ".output", ".wxt/types/imports-modules.d.ts"]
 }

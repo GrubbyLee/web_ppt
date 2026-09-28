@@ -1,0 +1,138 @@
+import { browser } from "wxt/browser";
+import type { Browser } from "wxt/browser";
+import { createAudienceCompositor, sanitizeAudienceMasks, type CompositorState } from "@/lib/compositor";
+import type { BgMessage, UiMessage } from "@/messaging/protocol";
+import { PORT_PREFIX } from "@/messaging/protocol";
+
+let captureStream: MediaStream | null = null;
+let audienceStream: MediaStream | null = null;
+let compositor: { stream: MediaStream; stop(): void } | null = null;
+let latest: CompositorState & { captureUnsafe: boolean } = { screenMode: "privacy", offlineFallbackActive: true, privacyMasks: [], captureUnsafe: true };
+const peers = new Map<string, RTCPeerConnection>();
+let port: Browser.runtime.Port | null = null;
+
+function post(message: UiMessage): void {
+  try {
+    port?.postMessage(message);
+  } catch {
+    // The background will rebuild the pipeline on the next viewer join.
+  }
+}
+
+function readState(): CompositorState {
+  return {
+    screenMode: latest.screenMode,
+    offlineFallbackActive: latest.offlineFallbackActive || latest.captureUnsafe,
+    privacyMasks: latest.privacyMasks
+  };
+}
+
+function closePeer(viewerId: string): void {
+  const peer = peers.get(viewerId);
+  if (!peer) return;
+  peers.delete(viewerId);
+  try {
+    peer.close();
+  } catch {
+    // Already closed.
+  }
+}
+
+function stopCapture(): void {
+  for (const viewerId of [...peers.keys()]) closePeer(viewerId);
+  compositor?.stop();
+  compositor = null;
+  audienceStream = null;
+  captureStream?.getTracks().forEach((track) => track.stop());
+  captureStream = null;
+  post({ type: "capture-state", active: false });
+}
+
+async function startCapture(streamId: string): Promise<void> {
+  if (compositor) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        // Chrome-specific constraint: consume the tab stream signed by the
+        // background service worker.
+        mandatory: {
+          chromeMediaSource: "tab",
+          chromeMediaSourceId: streamId
+        }
+      } as MediaTrackConstraints
+    });
+    stopCapture();
+    captureStream = stream;
+    compositor = createAudienceCompositor(stream, readState);
+    audienceStream = compositor.stream;
+    post({ type: "capture-state", active: true });
+    for (const viewerId of pendingViewers) void addViewer(viewerId);
+    pendingViewers.clear();
+    stream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => {
+      if (captureStream === stream) stopCapture();
+    }, { once: true }));
+  } catch (error) {
+    stopCapture();
+    post({ type: "capture-state", active: false, error: error instanceof Error ? error.message : "标签捕获被拒绝或不可用。" });
+  }
+}
+
+const pendingViewers = new Set<string>();
+
+async function addViewer(viewerId: string): Promise<void> {
+  if (peers.has(viewerId)) return;
+  if (!audienceStream) {
+    pendingViewers.add(viewerId);
+    return;
+  }
+  const peer = new RTCPeerConnection({ iceServers: [] });
+  peers.set(viewerId, peer);
+  audienceStream.getTracks().forEach((track) => peer.addTrack(track, audienceStream!));
+  peer.onicecandidate = (event) => {
+    if (event.candidate) post({ type: "rtc-signal", to: viewerId, from: "publisher", data: { type: "candidate", candidate: event.candidate } });
+  };
+  peer.onconnectionstatechange = () => {
+    if (["failed", "closed", "disconnected"].includes(peer.connectionState)) closePeer(viewerId);
+  };
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  post({ type: "rtc-signal", to: viewerId, from: "publisher", data: { type: "offer", sdp: peer.localDescription } });
+}
+
+function handleSignal(from: string, data: { type?: string; sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }): void {
+  const peer = peers.get(from);
+  if (!peer || !data || typeof data.type !== "string") return;
+  if (data.type === "answer" && data.sdp) void peer.setRemoteDescription(data.sdp).catch(() => undefined);
+  if (data.type === "candidate" && data.candidate) void peer.addIceCandidate(data.candidate).catch(() => undefined);
+}
+
+function connectPort(): void {
+  const next = browser.runtime.connect({ name: `${PORT_PREFIX}offscreen` });
+  port = next;
+  next.onDisconnect.addListener(() => {
+    if (port !== next) return;
+    port = null;
+    setTimeout(connectPort, 500);
+  });
+  next.onMessage.addListener((message: BgMessage) => {
+    if (message.type === "capture-start") void startCapture(message.streamId);
+    if (message.type === "capture-stop") stopCapture();
+    if (message.type === "viewer-added") void addViewer(message.viewerId);
+    if (message.type === "viewer-removed") closePeer(message.viewerId);
+    if (message.type === "rtc-signal") handleSignal(message.from, message.data as { type?: string; sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit });
+    if (message.type === "state") {
+      const machine = message.state.machine;
+      const page = machine.project.pages[machine.session.currentPageIndex];
+      latest = {
+        screenMode: machine.session.screenMode,
+        offlineFallbackActive: machine.session.offlineFallbackPageId !== null && machine.session.offlineFallbackPageId === page?.id,
+        privacyMasks: sanitizeAudienceMasks(page?.privacyMasks ?? []),
+        captureUnsafe: message.state.meta.tabUnsafeOrigin === true
+      };
+    }
+  });
+  post({ type: "hello", ctx: "offscreen" });
+}
+
+connectPort();

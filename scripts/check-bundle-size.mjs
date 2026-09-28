@@ -3,8 +3,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const targets = {
-  desktop: { directory: resolve(root, "apps/desktop/dist"), limit: 2 * 1024 * 1024 },
-  extension: { directory: resolve(root, "apps/extension/dist"), limit: 600 * 1024 }
+  extension: { directory: resolve(root, "apps/extension/.output/chrome-mv3"), limit: 1200 * 1024 }
 };
 const requested = process.argv.slice(2);
 const names = requested.length > 0 ? requested : Object.keys(targets);
