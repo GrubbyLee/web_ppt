@@ -1,44 +1,70 @@
 import { describe, expect, it } from "vitest";
-import { ProjectSchema } from "@showit/contracts";
+import { ProjectSchema, validateBusinessUrl } from "@showit/contracts";
 import { runProjectPreflight } from "./preflight";
 import { migrateLegacyBundledSample, sampleProject } from "./sample-project";
 
-describe("LCAPIM golden sample", () => {
+describe("built-in demo sample (云枢)", () => {
   it("keeps all 18 configured pages valid and ordered", () => {
     expect(ProjectSchema.safeParse(sampleProject).success).toBe(true);
     expect(sampleProject.pages).toHaveLength(18);
     expect(new Set(sampleProject.pages.map((page) => page.id)).size).toBe(18);
     expect(sampleProject.pages.map((page) => page.order)).toEqual(Array.from({ length: 18 }, (_, index) => index));
     for (const page of sampleProject.pages) {
-      expect(page.url).toMatch(/^http:\/\/localhost:3001\/console\/\?view=/);
       expect(page.script.markdown.trim().length).toBeGreaterThan(0);
       expect(page.script.steps.length).toBeGreaterThan(0);
-      expect(page.connectorId).toBe("lc-apim-local");
-      expect(page.pageType).toBe("business");
     }
   });
 
-  it("maps every page to its real read-only business view", () => {
-    expect(sampleProject.connectors[0]).toMatchObject({ origin: "http://localhost:3001", mode: "iframe", securityMode: "readonly-proxy" });
-    expect(sampleProject.pages.map((page) => page.url)).toEqual([
-      "http://localhost:3001/console/?view=overview", "http://localhost:3001/console/?view=overview", "http://localhost:3001/console/?view=admin", "http://localhost:3001/console/?view=overview", "http://localhost:3001/console/?view=portal", "http://localhost:3001/console/?view=marketplace", "http://localhost:3001/console/?view=applications", "http://localhost:3001/console/?view=subscriptions", "http://localhost:3001/console/?view=studio", "http://localhost:3001/console/?view=studio-details", "http://localhost:3001/console/?view=registry", "http://localhost:3001/console/?view=overview", "http://localhost:3001/console/?view=approvals", "http://localhost:3001/console/?view=operations", "http://localhost:3001/console/?view=admin", "http://localhost:3001/console/?view=admin-controls", "http://localhost:3001/console/?view=admin", "http://localhost:3001/console/?view=overview"
+  it("maps live pages to built-in demo views and chapters to stage slides", () => {
+    const livePages = sampleProject.pages.filter((page) => page.pageType === "business");
+    expect(livePages.map((page) => page.url)).toEqual([
+      "demo://marketplace",
+      "demo://subscriptions",
+      "demo://studio",
+      "demo://registry",
+      "demo://approvals",
+      "demo://operations",
+      "demo://admin-controls"
     ]);
+    for (const page of livePages) {
+      expect(validateBusinessUrl(page.url!).valid).toBe(true);
+      expect(page.connectorId).toBeUndefined();
+    }
+    const slidePages = sampleProject.pages.filter((page) => page.pageType === "fixed");
+    expect(slidePages).toHaveLength(10);
+    expect(slidePages.every((page) => page.url === undefined)).toBe(true);
+    expect(sampleProject.pages.at(-1)?.pageType).toBe("end");
   });
 
-  it("migrates only an untouched legacy bundled sample", () => {
-    const legacy = structuredClone(sampleProject);
-    legacy.connectors[0] = { ...legacy.connectors[0]!, origin: "http://localhost:3000", mode: "extension", allowedOrigins: ["http://localhost:3000"], loginPaths: ["/login", "/sso"], logoutPaths: ["/logout"], sessionProbe: undefined };
-    legacy.pages = legacy.pages.map((page) => ({ ...page, pageType: page.id === "closing" ? "end" : "business", url: `http://localhost:3000/docs/demo/lc-apim-customer-demo/index.html?mode=presenter&showitPage=${page.id}` }));
-    const persistedLegacy = ProjectSchema.parse(JSON.parse(JSON.stringify(legacy)));
-    expect(migrateLegacyBundledSample(persistedLegacy)?.pages[0]?.url).toBe("http://localhost:3001/console/?view=overview");
-    expect(migrateLegacyBundledSample({ ...legacy, name: "客户已修改" })).toBeNull();
+  it("exercises the full product feature set through executable steps", () => {
+    const stepsWithActions = sampleProject.pages.flatMap((page) => page.script.steps).filter((step) => step.recordedAction);
+    expect(stepsWithActions.length).toBeGreaterThanOrEqual(15);
+
+    const loginPage = sampleProject.pages.find((page) => page.id === "visitor-live-demo")!;
+    const passwordFill = loginPage.script.steps.find((step) => step.recordedAction?.type === "fill" && step.recordedAction.input.source === "sensitive");
+    expect(passwordFill?.recordedAction).toMatchObject({ type: "fill", input: { source: "sensitive", key: "demoPassword" } });
+    expect(sampleProject.sensitiveVariables.map((variable) => variable.key)).toContain("demoPassword");
+
+    const registryPage = sampleProject.pages.find((page) => page.id === "producer-live-demo")!;
+    const publishStep = registryPage.script.steps.find((step) => step.risk === "high");
+    expect(publishStep?.recordedAction).toMatchObject({ type: "click", locator: { strategy: "testid", value: "publish-api" } });
+    expect(publishStep?.expectedCondition).toMatchObject({ type: "element" });
+
+    const chained = loginPage.script.steps.find((step) => step.autoContinue === true);
+    expect(chained?.expectedCondition).toBeDefined();
+
+    expect(loginPage.offline?.kind).toBe("html");
   });
 
-  it("upgrades the immediately preceding untouched bundled sample", () => {
-    const prior = structuredClone(sampleProject);
-    prior.connectors[0] = { ...prior.connectors[0]!, sessionProbe: undefined };
-    const migrated = migrateLegacyBundledSample(prior);
-    expect(migrated?.connectors[0]?.sessionProbe?.path).toBe("/api/lc/v1/session/status");
+  it("migrates only untouched legacy bundled samples", () => {
+    const legacy = migrateLegacyBundledSample(sampleProject);
+    expect(legacy).toBeNull();
+
+    const stored = {
+      id: sampleProject.id,
+      name: "客户已修改"
+    };
+    expect(migrateLegacyBundledSample(stored as never)).toBeNull();
   });
 
   it("covers the five business roles and passes publish preflight", () => {

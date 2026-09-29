@@ -20,7 +20,8 @@ npm run typecheck
 npm run test           # vitest 单元测试
 npm run build          # wxt build + 体积门禁
 npm run test:extension-browser   # 组件级冒烟（清单/侧边栏/工作台/内容脚本）
-npm run test:extension-e2e       # 端到端（启动演示→翻页→观众窗口→结束）
+npm run test:extension-e2e       # 端到端（真实 HTTP 业务页路径）
+npm run test:extension-demo-e2e  # 端到端（内置示例全产品验证）
 npm run release:extension        # 可复现 ZIP + SHA-256
 ```
 
@@ -51,7 +52,7 @@ packages/contracts              # 项目/页面/步骤/连接器/版本/排练 Z
 - `request-protection` 与 `readonly-proxy` 由 DNR 规则实现（拦截写方法请求，登录/登出/切角路径可放行）。
 - 本机观众窗口经 offscreen 文档的 tabCapture + WebRTC 回环分发；打开多个观众窗口不受软件限制。
 - 第三方项目导入前显示域名、离线 HTML、自动权限、高风险步骤与资源大小，信任记录绑定项目 SHA-256 内容指纹。
-- 内置 LCAPIM 18 页演示样例，可删除、可复制。
+- 内置「云枢 · 五角色能力治理闭环」18 页示例：业务系统为扩展内置的演示控制台（`demo://` 视图），完全离线运行；登录步骤演示敏感变量、发布步骤演示高风险确认、搜索链演示验证后自动续跑，并覆盖标注、遮罩、观众镜像与离线备用。
 - 敏感数据红线：不保存业务账号、密码、Cookie、Token 或 Secret；观众侧 HTML 禁止脚本和外部网络。
 
 ## 范围裁剪（相对 v0.1）

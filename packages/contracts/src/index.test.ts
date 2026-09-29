@@ -15,6 +15,16 @@ describe("validateBusinessUrl", () => {
     expect(validateBusinessUrl("https://example.com/app?access_token=private").valid).toBe(false);
   });
 
+  it("accepts only literal built-in demo views", () => {
+    expect(validateBusinessUrl("demo://marketplace").valid).toBe(true);
+    expect(validateBusinessUrl("demo://studio-details").valid).toBe(true);
+    expect(validateBusinessUrl("demo://Marketplace").valid).toBe(false);
+    expect(validateBusinessUrl("demo://marketplace?q=1").valid).toBe(false);
+    expect(validateBusinessUrl("demo://marketplace/path").valid).toBe(false);
+    expect(validateBusinessUrl("demo://").valid).toBe(false);
+    expect(validateBusinessUrlTemplate("demo://{{project.view}}").valid).toBe(false);
+  });
+
   it("allows templates below the URL authority and rejects host interpolation", () => {
     expect(validateBusinessUrlTemplate("https://example.com/customer/{{project.customer}}").valid).toBe(true);
     expect(validateBusinessUrlTemplate("https://{{project.host}}/customer").valid).toBe(false);

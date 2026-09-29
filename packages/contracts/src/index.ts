@@ -19,7 +19,13 @@ const runtimeSecretKey = z
   .max(80)
   .regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/, "敏感变量名必须以字母开头，只能使用字母、数字、下划线和连字符");
 
+/** Reserved scheme for the extension's built-in demo console: `demo://<view>`.
+ *  The host maps it onto chrome-extension://<id>/demo.html#/<view>; it never
+ *  points at network resources and carries no credentials or query strings. */
+const demoViewPattern = /^demo:\/\/[a-z][a-z0-9-]*$/;
+
 function isAllowedBusinessUrl(value: string): boolean {
+  if (demoViewPattern.test(value)) return true;
   try {
     const url = new URL(value);
     const localHost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
@@ -34,7 +40,7 @@ function isAllowedBusinessUrl(value: string): boolean {
 const businessUrl = z
   .string()
   .url("请输入完整的 HTTP(S) URL。")
-  .refine(isAllowedBusinessUrl, "只允许 HTTPS，或 localhost/127.0.0.1 的 HTTP 地址，且不能包含凭据或敏感查询参数。");
+  .refine(isAllowedBusinessUrl, "只允许 HTTPS、localhost/127.0.0.1 的 HTTP 地址或内置演示页（demo://视图），且不能包含凭据或敏感查询参数。");
 
 function isAllowedBusinessUrlTemplate(value: string): boolean {
   if (!value.includes("{{")) return isAllowedBusinessUrl(value);
@@ -55,7 +61,7 @@ const businessUrlTemplate = z
   .string()
   .min(1)
   .max(4_000)
-  .refine(isAllowedBusinessUrlTemplate, "URL 模板必须使用 HTTPS 或本机开发 Origin，不能包含凭据或敏感查询参数，变量只能出现在路径、查询或 Hash 中。");
+  .refine(isAllowedBusinessUrlTemplate, "URL 模板必须使用 HTTPS 或本机开发 Origin（内置演示页不支持模板变量），不能包含凭据或敏感查询参数，变量只能出现在路径、查询或 Hash 中。");
 
 function isAllowedConnectorPath(value: string): boolean {
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[?#]/.test(value)) return false;

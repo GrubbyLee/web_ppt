@@ -1,15 +1,41 @@
 import { describe, expect, it, vi } from "vitest";
-import { sampleProject } from "./sample-project";
+import type { PresentationConnector } from "@showit/contracts";
 import { probeConnectorSession, supportsConnectorSessionProbe } from "./connector-session";
 
-describe("connector session probe", () => {
-  const connector = sampleProject.connectors[0]!;
+const connector: PresentationConnector = {
+  id: "connector",
+  name: "连接器",
+  origin: "https://product.example",
+  mode: "iframe",
+  permission: "assist",
+  securityMode: "interactive",
+  environment: "test",
+  requestHeaders: [],
+  basicAuthInstructions: "",
+  loginPaths: [],
+  logoutPaths: [],
+  roleSwitchPaths: [],
+  sandboxPermissions: [],
+  allowedOrigins: ["https://product.example"],
+  sessionProbe: {
+    path: "/api/lc/v1/session/status",
+    userPath: ["data", "user"],
+    primaryRoleField: "role",
+    rolesField: "roles",
+    roleMappings: [
+      { presentationRole: "访客", connectorRole: "guest" },
+      { presentationRole: "能力运营者", connectorRole: "operator" },
+      { presentationRole: "系统管理员", connectorRole: "admin" }
+    ]
+  }
+};
 
+describe("connector session probe", () => {
   it("reads session fields and role mappings from connector configuration", async () => {
     const response = (user: unknown) => vi.fn(async () => new Response(JSON.stringify({ data: { user } }), { status: 200 }));
-    await expect(probeConnectorSession("http://localhost:4173/console/", "访客", connector, response(null) as typeof fetch)).resolves.toMatchObject({ state: "anonymous" });
-    await expect(probeConnectorSession("http://localhost:4173/console/", "能力运营者", connector, response({ role: "operator", roles: [] }) as typeof fetch)).resolves.toEqual({ state: "ready", role: "operator" });
-    await expect(probeConnectorSession("http://localhost:4173/console/", "系统管理员", connector, response({ role: "guest", roles: [] }) as typeof fetch)).resolves.toMatchObject({ state: "role-mismatch", role: "guest" });
+    await expect(probeConnectorSession("https://product.example/console/", "访客", connector, response(null) as typeof fetch)).resolves.toMatchObject({ state: "anonymous" });
+    await expect(probeConnectorSession("https://product.example/console/", "能力运营者", connector, response({ role: "operator", roles: [] }) as typeof fetch)).resolves.toEqual({ state: "ready", role: "operator" });
+    await expect(probeConnectorSession("https://product.example/console/", "系统管理员", connector, response({ role: "guest", roles: [] }) as typeof fetch)).resolves.toMatchObject({ state: "role-mismatch", role: "guest" });
   });
 
   it("is enabled only through connector configuration", () => {

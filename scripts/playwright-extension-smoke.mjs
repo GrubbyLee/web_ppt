@@ -89,7 +89,7 @@ try {
   await workbench.goto(`chrome-extension://${extensionId}/workbench.html`);
   await workbench.waitForSelector(".workspace-topbar", { timeout: 5_000 });
   await workbench.waitForSelector("text=个本地项目", { timeout: 10_000 });
-  assert(await workbench.isVisible("text=LCAPIM"), "内置 LCAPIM 样例项目已初始化");
+  assert(await workbench.isVisible("text=云枢 · 五角色能力治理闭环"), "内置云松示例项目已初始化");
   const workbenchOverflow = await workbench.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert(workbenchOverflow <= 0, "工作台无水平溢出");
   await workbench.screenshot({ path: resolve(resultsDir, "extension-workbench.png") });

@@ -45,7 +45,7 @@ let machine: MachineState | null = null;
 const runtime = {
   sessionWindowId: null as number | null,
   sessionTabId: null as number | null,
-  tabKind: null as "business" | "stage" | null,
+  tabKind: null as "business" | "stage" | "demo" | null,
   tabStatus: null as "loading" | "complete" | "error" | null,
   tabUnsafeOrigin: false,
   connectorState: null as ConnectorRuntimeState | null,
@@ -160,6 +160,12 @@ function stageUrl(): string {
 function targetUrlForPage(page: PresentationPage | null): string {
   if (!machine || !page) return stageUrl();
   if (offlineActive() || page.pageType === "fixed" || page.pageType === "end" || !page.url) return stageUrl();
+  // Built-in demo pages live inside the extension (demo://<view>) and never
+  // touch the network.
+  if (page.url.startsWith("demo://")) {
+    const view = page.url.slice("demo://".length);
+    return `${browser.runtime.getURL("/demo.html")}#/${view}`;
+  }
   const resolved = resolveUrlTemplate(page.url, machine.project, page);
   if (resolved.ok) return resolved.value;
   const fallback = page.fallbackUrl ? resolveUrlTemplate(page.fallbackUrl, machine.project, page) : null;
@@ -172,6 +178,10 @@ function businessReady(): boolean {
   if (!page) return false;
   if (offlineActive()) return isOfflineFallbackReady(page.offline);
   if (page.pageType === "fixed" || page.pageType === "end" || !page.url) return true;
+  if (page.url.startsWith("demo://")) {
+    // The demo page reports ready/anonymous over its port; null means loading.
+    return runtime.tabKind === "demo" && runtime.tabStatus === "complete" && runtime.connectorState?.state === "ready";
+  }
   if (runtime.tabKind !== "business" || runtime.tabStatus !== "complete") return false;
   return (runtime.connectorState?.state ?? "ready") === "ready";
 }
@@ -349,10 +359,16 @@ async function openSessionWindow(targetUrl: string): Promise<void> {
   runtime.tabUnsafeOrigin = false;
 }
 
+let navigationToken = 0;
+
 async function syncSessionTab(force = false): Promise<void> {
   if (!machine || runtime.sessionTabId === null) return;
+  // Rapid page changes race their tabs.update calls; only the latest
+  // navigation may win, otherwise an intermediate page can land last.
+  const token = ++navigationToken;
+  const outdated = () => token !== navigationToken;
   const target = targetUrlForPage(currentPage());
-  const wantKind = target === stageUrl() ? "stage" : "business";
+  const wantKind = target === stageUrl() ? "stage" : target.includes("/demo.html") ? "demo" : "business";
   let currentUrl: string | undefined;
   try {
     const tab = await browser.tabs.get(runtime.sessionTabId);
@@ -360,6 +376,7 @@ async function syncSessionTab(force = false): Promise<void> {
   } catch {
     return;
   }
+  if (outdated()) return;
   const sameBusiness = wantKind === "business" && runtime.tabKind === "business" && currentUrl === target;
   if (!force && sameBusiness) return;
   if (wantKind === "stage" && runtime.tabKind === "stage" && currentUrl?.startsWith(stageUrl())) return;
@@ -367,6 +384,7 @@ async function syncSessionTab(force = false): Promise<void> {
   runtime.tabStatus = "loading";
   runtime.connectorState = null;
   runtime.tabUnsafeOrigin = false;
+  if (outdated()) return;
   await browser.tabs.update(runtime.sessionTabId, { url: target }).catch((error) => recordDiagnostic("导航演示标签", error));
 }
 
@@ -423,41 +441,47 @@ async function probeSessionTab(): Promise<void> {
   }
 }
 
-async function handleTabUpdated(tabId: number, changeInfo: Browser.tabs.OnUpdatedInfo, tab: Browser.tabs.Tab): Promise<void> {
-  if (runtime.sessionTabId === tabId) {
-    if (changeInfo.status === "complete") {
-      runtime.tabStatus = "complete";
-      const url = safePageUrl(tab.url ?? "");
-      const expected = targetUrlForPage(currentPage());
-      const expectedOrigin = expected === stageUrl() ? null : new URL(expected).origin;
-      runtime.tabUnsafeOrigin = Boolean(url && expectedOrigin && new URL(url).origin !== expectedOrigin && !isDescendantOrigin(new URL(url).origin, expectedOrigin));
-      if (runtime.tabKind === "business") {
-        await syncOverlay();
-        await probeSessionTab();
-      } else {
-        runtime.connectorState = null;
-      }
-      broadcastState();
-    } else if (changeInfo.status === "loading") {
-      runtime.tabStatus = "loading";
-      broadcastState();
-    }
-    return;
-  }
-  if (!recorder || recorder.tabId !== tabId || changeInfo.status !== "complete") return;
-  const url = safePageUrl(tab.url ?? "");
-  if (!url || url === recorder.lastUrl) return;
-  recorder.lastUrl = url;
-  postToContext("workbench", { type: "recorded-action", recordingId: recorder.recordingId, action: { type: "navigate", url } satisfies RecordedAction });
-  void browser.tabs.sendMessage(tabId, { type: "showit-recorder-start", recordingId: recorder.recordingId }).catch(() => undefined);
-}
-
-function isDescendantOrigin(candidate: string, base: string): boolean {
-  return candidate === base;
-}
-
 export default defineBackground(() => {
   self.addEventListener("unhandledrejection", (event) => recordDiagnostic("未处理 Promise", (event as PromiseRejectionEvent).reason));
+  async function handleTabUpdated(tabId: number, changeInfo: Browser.tabs.OnUpdatedInfo, tab: Browser.tabs.Tab): Promise<void> {
+    if (runtime.sessionTabId === tabId) {
+      if (changeInfo.status === "complete") {
+        runtime.tabStatus = "complete";
+        const url = safePageUrl(tab.url ?? "");
+        const expected = targetUrlForPage(currentPage());
+        const expectedOrigin = expected === stageUrl() ? null : new URL(expected).origin;
+        runtime.tabUnsafeOrigin = Boolean(url && expectedOrigin && new URL(url).origin !== expectedOrigin && !isDescendantOrigin(new URL(url).origin, expectedOrigin));
+        if (runtime.tabKind === "business") {
+          await syncOverlay();
+          await probeSessionTab();
+        } else if (runtime.tabKind === "demo") {
+          // The demo page natively implements the connector protocol and
+          // reports its login state on the showit:demo port.
+          runtime.connectorState = null;
+          if (viewers.size > 0) void startCapture();
+        } else {
+          runtime.connectorState = null;
+        }
+        broadcastState();
+      } else if (changeInfo.status === "loading") {
+        runtime.tabStatus = "loading";
+        broadcastState();
+      }
+      return;
+    }
+    if (!recorder || recorder.tabId !== tabId || changeInfo.status !== "complete") return;
+    const url = safePageUrl(tab.url ?? "") ?? (tab.url?.startsWith(browser.runtime.getURL("/demo.html")) ? tab.url : null);
+    if (!url || url === recorder.lastUrl) return;
+    recorder.lastUrl = url;
+    postToContext("workbench", { type: "recorded-action", recordingId: recorder.recordingId, action: { type: "navigate", url } satisfies RecordedAction });
+    void browser.tabs.sendMessage(tabId, { type: "showit-recorder-start", recordingId: recorder.recordingId }).catch(() => undefined);
+  }
+
+  function isDescendantOrigin(candidate: string, base: string): boolean {
+    return candidate === base;
+  }
+
+
   browser.tabs.onUpdated.addListener((tabId: number, changeInfo: Browser.tabs.OnUpdatedInfo, tab: Browser.tabs.Tab) => {
     void handleTabUpdated(tabId, changeInfo, tab);
   });
@@ -534,7 +558,7 @@ export default defineBackground(() => {
     const page = currentPage();
     if (!page) return;
     const step = page.script.steps.find((item) => item.id === stepId);
-    if (!step?.recordedAction || !isValidExecutionAction(step.recordedAction as unknown as Record<string, unknown>)) return;
+    if (!step?.recordedAction || !isValidRecordedAction(step.recordedAction as unknown as Record<string, unknown>)) return;
     const connector = connectorForPage(machine.project, page);
     const execution = capExecution(step.execution, connector);
     if (execution === "hint") {
@@ -546,6 +570,11 @@ export default defineBackground(() => {
       action = resolveRecordedAction(step.recordedAction, machine.project, page, machine.session.id) as unknown as Record<string, unknown>;
     } catch {
       runtime.message = "步骤缺少敏感变量，请在控制台填写后重试。";
+      broadcastState();
+      return;
+    }
+    if (!isValidExecutionAction(action)) {
+      runtime.message = "步骤动作不安全或无效，已拒绝执行。";
       broadcastState();
       return;
     }
@@ -618,14 +647,22 @@ export default defineBackground(() => {
     if (!page) return;
     const step = page.script.steps.find((item) => item.id === stepId);
     if (!step) return;
-    if (step.risk === "high" && !machine.session.completedStepIds.includes(stepId)) {
+    const isCompleted = machine.session.completedStepIds.includes(stepId);
+    if (step.risk === "high" && !isCompleted) {
       if (!confirmed) {
+        // Pinned confirmation dialog (v0.1 semantics).
         applyMachineAction({ type: "toggle-step", stepId });
         return;
       }
+      // Confirmed: mark complete first, then still run the recorded action —
+      // "确认并执行" both confirms and executes (completion is idempotent).
       applyMachineAction({ type: "confirm-high-risk-step" });
+      if (step.recordedAction && step.execution !== "hint") {
+        void runStepExecution(stepId);
+      }
+      return;
     }
-    if (step.recordedAction && step.execution !== "hint" && !machine.session.completedStepIds.includes(stepId)) {
+    if (step.recordedAction && step.execution !== "hint" && !isCompleted) {
       void runStepExecution(stepId);
       return;
     }
@@ -732,6 +769,9 @@ export default defineBackground(() => {
 
   async function startCapture(): Promise<void> {
     if (!machine || runtime.sessionTabId === null || captureActive) return;
+    // Demo and stage pages cannot be captured (experiment E3); the audience
+    // mirrors them locally, so capture is reserved for real business tabs.
+    if (runtime.tabKind !== "business") return;
     if (!await ensureOffscreen()) {
       runtime.message = "观众画面离屏文档不可用。";
       broadcastState();
@@ -782,8 +822,10 @@ export default defineBackground(() => {
     if (viewers.has(viewerId)) return;
     viewers.set(viewerId, { viewerId, status: "connecting" });
     void (async () => {
-      await startCapture();
-      if (captureActive || runtime.sessionTabId !== null) postToOffscreen({ type: "viewer-added", viewerId });
+      // Demo/stage pages cannot be captured (experiment E3) — the audience
+      // window mirrors them locally instead.
+      if (runtime.tabKind === "business") await startCapture();
+      postToOffscreen({ type: "viewer-added", viewerId });
       broadcastState();
     })();
   }
@@ -819,23 +861,29 @@ export default defineBackground(() => {
   // ---- recorder -----------------------------------------------------------------------
 
   async function startRecorder(recordingId: string): Promise<void> {
-    const [tab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
-    if (!tab?.id || !safePageUrl(tab.url ?? "")) {
+    // While a session is live the session tab is the recording target; the
+    // workbench (usually in another window) is never the active business tab.
+    const sessionTab = runtime.sessionTabId !== null ? await browser.tabs.get(runtime.sessionTabId).catch(() => null) : null;
+    const [tab] = sessionTab ? [sessionTab] : await browser.tabs.query({ active: true, lastFocusedWindow: true });
+    const isDemoTab = Boolean(tab?.url?.startsWith(browser.runtime.getURL("/demo.html")));
+    if (!tab?.id || (!safePageUrl(tab.url ?? "") && !isDemoTab)) {
       postToContext("workbench", { type: "recorder-state", active: false, reason: "未找到已授权的活动业务标签。" });
       return;
     }
-    const origin = new URL(safePageUrl(tab.url ?? "")!).origin;
-    let granted = false;
-    try {
-      granted = await browser.permissions.contains({ origins: [originPattern(origin)] });
-    } catch {
-      granted = false;
+    const origin = new URL(safePageUrl(tab.url ?? "") ?? tab.url ?? "about:blank").origin;
+    let granted = isDemoTab;
+    if (!granted) {
+      try {
+        granted = await browser.permissions.contains({ origins: [originPattern(origin)] });
+      } catch {
+        granted = false;
+      }
     }
     if (!granted) {
       postToContext("workbench", { type: "recorder-state", active: false, reason: `需要先授权 ${origin}`, origin });
       return;
     }
-    if (!await ensureContentScript(tab.id)) {
+    if (!isDemoTab && !await ensureContentScript(tab.id)) {
       postToContext("workbench", { type: "recorder-state", active: false, reason: "业务页连接器无法注入。" });
       return;
     }
@@ -844,7 +892,7 @@ export default defineBackground(() => {
       postToContext("workbench", { type: "recorder-state", active: false, reason: "业务标签未加载 Showit 连接器。" });
       return;
     }
-    recorder = { recordingId, tabId: tab.id, lastUrl: safePageUrl(tab.url ?? "")! };
+    recorder = { recordingId, tabId: tab.id, lastUrl: safePageUrl(tab.url ?? "") ?? tab.url ?? "" };
     postToContext("workbench", { type: "recorder-state", active: true, pageTitle: String(result.title || "").slice(0, 160) });
     broadcastState();
   }
@@ -1043,6 +1091,31 @@ export default defineBackground(() => {
       case "open-audience":
         openAudienceWindow();
         return;
+      case "authorize-capture":
+        await authorizeCapture();
+        return;
+      case "demo-connector-state": {
+        // The built-in demo page reports its login gate over its port.
+        if (runtime.tabKind === "demo") {
+          runtime.connectorState = { state: message.state };
+          broadcastState();
+        }
+        return;
+      }
+      case "stage-laser": {
+        // Stage and demo pages are not capturable; their pointer positions are
+        // relayed to the audience windows that render locally.
+        const laser = message.laser;
+        for (const target of uiPorts) {
+          if (target.ctx !== "audience") continue;
+          try {
+            target.port.postMessage({ type: "laser", laser });
+          } catch {
+            uiPorts.delete(target);
+          }
+        }
+        return;
+      }
       case "open-workbench":
         await browser.tabs.create({ url: browser.runtime.getURL("/workbench.html") }).catch((error) => recordDiagnostic("打开工作台", error));
         return;
@@ -1113,8 +1186,11 @@ export default defineBackground(() => {
       return false;
     }
     if (typed.type === "showit-recorded-action") {
-      const payload = typed as unknown as { recordingId: string; action: RecordedAction };
-      if (!recorder || sender.tab?.id !== recorder.tabId || payload.recordingId !== recorder.recordingId || !isValidRecordedAction(payload.action)) return false;
+      const payload = typed as unknown as { recordingId: string; action: RecordedAction; tabId?: number };
+      // Extension pages (built-in demo) attach their tabId explicitly in case
+      // the sender metadata lacks it.
+      const senderTabId = sender.tab?.id ?? payload.tabId ?? null;
+      if (!recorder || senderTabId !== recorder.tabId || payload.recordingId !== recorder.recordingId || !isValidRecordedAction(payload.action)) return false;
       postToContext("workbench", { type: "recorded-action", recordingId: recorder.recordingId, action: payload.action });
       sendResponse({ accepted: true });
       return false;

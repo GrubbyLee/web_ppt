@@ -5,6 +5,8 @@ import { browser } from "wxt/browser";
 import type { BgMessage, BroadcastState, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 import { OfflineFallbackView } from "@/components/OfflineFallbackView";
+import { DemoConsole } from "@/lib/demo/DemoConsole";
+import { demoViewFromUrl } from "@/lib/demo/views";
 import "@/components/ui.css";
 import "./audience.css";
 
@@ -92,12 +94,12 @@ function AudienceApp() {
   }, [viewerId]);
 
   const machine = state?.machine ?? null;
-  const circles: PresentationSession["circles"] = machine?.session.circles ?? [];
+  const demoView = machine ? demoViewFromUrl(machine.project.pages[machine.session.currentPageIndex]?.url) : null;
   const page = machine ? machine.project.pages[machine.session.currentPageIndex] ?? null : null;
   const offlineActive = Boolean(page && machine?.session.offlineFallbackPageId === page.id);
   const screenMode = machine?.session.screenMode ?? "privacy";
   const brand = machine?.project.brand;
-  const needsVideo = Boolean(machine && page && page.url && (page.pageType === "business" || page.pageType === "external") && !offlineActive && screenMode === "normal");
+  const needsVideo = Boolean(machine && page && page.url && !page.url.startsWith("demo://") && (page.pageType === "business" || page.pageType === "external") && !offlineActive && screenMode === "normal");
 
   useEffect(() => {
     document.title = brand?.audienceTitle ?? "Showit 观众屏";
@@ -107,18 +109,21 @@ function AudienceApp() {
     if (!needsVideo && videoLive) setVideoLive(false);
   }, [needsVideo, videoLive]);
 
-  const mode: "waiting" | "cover" | "offline" | "slide" | "video" | "connecting" = !machine
+  const mode: "waiting" | "cover" | "offline" | "slide" | "demo" | "video" | "connecting" = !machine
     ? "waiting"
     : screenMode !== "normal"
       ? "cover"
       : offlineActive
         ? "offline"
-        : !page?.url || page.pageType === "fixed" || page.pageType === "end"
-          ? "slide"
-          : videoLive
-            ? "video"
-            : "connecting";
+        : demoView
+          ? "demo"
+          : !page?.url || page.pageType === "fixed" || page.pageType === "end"
+            ? "slide"
+            : videoLive
+              ? "video"
+              : "connecting";
   const showVideo = mode === "video";
+  const circles: PresentationSession["circles"] = machine?.session.circles ?? [];
 
   return (
     <main className="audience-root" style={{ "--brand": brand?.primaryColor ?? "#37d0ba" } as React.CSSProperties}>
@@ -147,6 +152,12 @@ function AudienceApp() {
         </section>
       ) : null}
 
+      {mode === "demo" && demoView ? (
+        <div className="audience-demo">
+          <DemoConsole mode="mirror" view={demoView} />
+        </div>
+      ) : null}
+
       {mode === "offline" && page ? (
         <OfflineFallbackView fallback={page.offline} label={brand?.offlineLabel ?? "离线备用"} executeScripts={false} />
       ) : null}
@@ -167,6 +178,18 @@ function AudienceApp() {
 
       {machine && !showVideo ? (
         <div className="audience-annotations" aria-hidden="true">
+          {(demoView ? page?.privacyMasks ?? [] : []).map((mask) => (
+            <div
+              key={mask.id}
+              className={`audience-annotation-mask${mask.mode === "blur" ? " is-blur" : ""}`}
+              style={{
+                left: `${Math.min(mask.x1, mask.x2) * 100}%`,
+                top: `${Math.min(mask.y1, mask.y2) * 100}%`,
+                width: `${Math.abs(mask.x2 - mask.x1) * 100}%`,
+                height: `${Math.abs(mask.y2 - mask.y1) * 100}%`
+              }}
+            />
+          ))}
           {machine.session.circles.map((circle) => (
             <div
               key={circle.id}

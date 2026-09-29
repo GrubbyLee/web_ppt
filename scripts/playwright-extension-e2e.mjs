@@ -62,9 +62,10 @@ try {
   console.log("1) 工作台启动演示");
   const workbench = await context.newPage();
   await workbench.goto(`chrome-extension://${extensionId}/workbench.html`);
-  await workbench.waitForSelector("text=LCAPIM", { timeout: 10_000 });
-  // Point the bundled LCAPIM sample at the local fixture service so the
-  // session tab has a live, controllable business page.
+  await workbench.waitForSelector("text=云枢 · 五角色能力治理闭环", { timeout: 10_000 });
+  // Point ONE live page of the bundled sample at the local fixture service so
+  // the session tab has a real HTTP business page (content-script injection,
+  // probe, capture authorization guidance).
   await workbench.evaluate(async (port) => {
     const db = await new Promise((resolveDb, rejectDb) => {
       const request = indexedDB.open("showit", 1);
@@ -77,20 +78,8 @@ try {
       request.onsuccess = () => resolveItem(request.result[0]);
       request.onerror = () => rejectItem(request.error);
     });
-    const origin = `http://127.0.0.1:${port}`;
-    for (const connector of workspace.project.connectors) {
-      connector.origin = origin;
-      connector.allowedOrigins = [origin];
-      connector.sessionProbe = undefined;
-    }
-    for (const page of workspace.project.pages) {
-      if (typeof page.url === "string" && page.url.startsWith("http://localhost:3001")) {
-        page.url = `${origin}${page.url.slice("http://localhost:3001".length)}`;
-      }
-      if (typeof page.fallbackUrl === "string" && page.fallbackUrl.startsWith("http://localhost:3001")) {
-        page.fallbackUrl = `${origin}${page.fallbackUrl.slice("http://localhost:3001".length)}`;
-      }
-    }
+    const page = workspace.project.pages.find((item) => item.id === "visitor-live-demo");
+    page.url = `http://127.0.0.1:${port}/console/?view=marketplace`;
     await new Promise((resolveWrite, rejectWrite) => {
       const tx = db.transaction(["workspaces"], "readwrite");
       const request = tx.objectStore("workspaces").put(workspace);
@@ -99,7 +88,7 @@ try {
     });
   }, businessPort);
   await workbench.reload();
-  await workbench.waitForSelector("text=LCAPIM", { timeout: 10_000 });
+  await workbench.waitForSelector("text=云枢 · 五角色能力治理闭环", { timeout: 10_000 });
   // Pre-grant optional host permissions so the launch flow does not open a native prompt.
   await workbench.evaluate(() => {
     window.chrome.permissions.request = async () => true;
@@ -124,9 +113,23 @@ try {
   assert(panelReady, "侧边栏进入演示视图");
   assert(await sidepanel.isVisible("text=1/18"), "侧边栏显示第 1/18 页");
   await sidepanel.screenshot({ path: resolve(resultsDir, "e2e-sidepanel.png") });
+  // The bundled sample declares a required sensitive variable — provide it so
+  // the console is not blocked by the collection dialog.
+  const secretsDialog = sidepanel.locator(".dialog");
+  if (await secretsDialog.count() > 0) {
+    await secretsDialog.locator("input[type=password]").first().fill("cloudpivot-demo-2026");
+    await secretsDialog.getByText("提交并继续").click();
+    await sidepanel.waitForTimeout(500);
+  }
 
   console.log("3) 会话业务标签");
+  const navNext = sidepanel.locator(".panel-footer__nav").getByTitle("下一页");
+  for (let index = 0; index < 5; index += 1) {
+    await navNext.click();
+    await sidepanel.waitForTimeout(500);
+  }
   await sidepanel.waitForTimeout(2_000);
+  assert(await sidepanel.isVisible("text=6/18"), "翻到第 6/18 页（已改为 HTTP 业务页）");
   const businessPage = context.pages().find((page) => page.url().startsWith(`http://127.0.0.1:${businessPort}`));
   assert(Boolean(businessPage), "会话标签已打开并导航到业务页");
   if (businessPage) {
@@ -139,17 +142,17 @@ try {
 
   console.log("4) 计时");
   await sidepanel.getByTitle("开始计时").or(sidepanel.getByTitle("计时")).first().click({ timeout: 3_000 }).catch(() => undefined);
-  await sidepanel.locator(".panel-footer__nav").getByTitle("下一页").click();
-  await sidepanel.waitForTimeout(600);
-  assert(await sidepanel.isVisible("text=2/18"), "翻到第 2/18 页");
   await sidepanel.waitForTimeout(1_200);
   const totalTimer = await sidepanel.locator(".panel-timers div").first().textContent();
   assert(Boolean(totalTimer && totalTimer.trim().length > 0), "计时器在渲染");
 
   console.log("5) 翻页导航");
-  await sidepanel.locator(".panel-footer__nav").getByTitle("下一页").click();
+  await sidepanel.locator(".panel-footer__nav").getByTitle("上一页").click();
   await sidepanel.waitForTimeout(1_200);
-  assert(await sidepanel.isVisible("text=3/18"), "翻到第 3/18 页");
+  assert(await sidepanel.isVisible("text=5/18"), "翻回第 5/18 页（章节幻灯片）");
+  await sidepanel.locator(".panel-footer__nav").getByTitle("下一页").click();
+  await sidepanel.waitForTimeout(1_500);
+  assert(await sidepanel.isVisible("text=6/18"), "回到第 6/18 页");
   const businessUrl = businessPage ? await businessPage.url() : "";
   assert(businessUrl.includes("view="), `会话标签保持业务页面（${businessUrl}）`);
 
@@ -175,7 +178,7 @@ try {
       await sidepanel.waitForSelector("text=画面捕获需要授权", { timeout: 5_000 });
       assert(true, "侧边栏显示画面捕获授权引导");
       const badgeAfter = await audiencePage.textContent(".audience-badge").catch(() => null);
-      assert(Boolean(badgeAfter?.includes("3 / 18")), "观众窗口角标与当前页保持同步");
+      assert(Boolean(badgeAfter?.includes("6 / 18")), "观众窗口角标与当前页保持同步");
     }
     await audiencePage.screenshot({ path: resolve(resultsDir, "e2e-audience.png") });
   }

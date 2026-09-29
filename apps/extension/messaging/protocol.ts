@@ -3,7 +3,7 @@ import type { MachineState, SessionAction } from "../session/machine";
 
 /** Port names: `showit:<ctx>` — every extension context connects to the
  *  background with one long-lived port and receives broadcasts on it. */
-export type UiContext = "sidepanel" | "workbench" | "audience" | "stage" | "offscreen";
+export type UiContext = "sidepanel" | "workbench" | "audience" | "stage" | "offscreen" | "demo";
 
 export type ConnectorRuntimeState = {
   state: "ready" | "blocked" | "error" | "anonymous" | "role-mismatch";
@@ -21,7 +21,7 @@ export type BroadcastMeta = {
   running: boolean;
   live: boolean;
   sessionTabId: number | null;
-  tabKind: "business" | "stage" | null;
+  tabKind: "business" | "stage" | "demo" | null;
   tabStatus: "loading" | "complete" | "error" | null;
   tabUnsafeOrigin: boolean;
   businessReady: boolean;
@@ -56,6 +56,7 @@ export type UiMessage =
   | { type: "open-audience" }
   | { type: "authorize-capture" }
   | { type: "stage-laser"; laser: PresentationSession["laser"] }
+  | { type: "demo-connector-state"; state: "ready" | "anonymous" }
   | { type: "open-workbench" }
   | { type: "recorder-start"; recordingId: string }
   | { type: "recorder-stop"; recordingId: string }
