@@ -18,7 +18,9 @@
     "test:extension-e2e": "node scripts/playwright-extension-e2e.mjs",
     "icons": "node scripts/make-icons.mjs apps/extension/public/icons",
     "release:extension": "npm run build -w @showit/extension && npm run bundle:check && node scripts/package-extension.mjs",
-    "test:extension-demo-e2e": "node scripts/playwright-extension-demo-e2e.mjs"
+    "test:extension-demo-e2e": "node scripts/playwright-extension-demo-e2e.mjs",
+    "test:remote-e2e": "node scripts/playwright-remote-e2e.mjs",
+    "relay:dev": "npm run dev -w @showit/relay"
   },
   "engines": {
     "node": ">=22 <23",

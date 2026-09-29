@@ -33,9 +33,19 @@ export type BroadcastMeta = {
   recorderActive: boolean;
   captureActive: boolean;
   viewerCount: number;
+  remote: RemoteAudienceState | null;
   offlineOriginRequest: string | null;
   message: string | null;
   demoMutations: DemoMutationState;
+};
+
+export type RemoteAudienceState = {
+  roomCode: string;
+  viewerLink: string;
+  capacity: "p2p" | "sfu";
+  joinMode: "direct" | "approval";
+  viewerCount: number;
+  pending: Array<{ viewerId: string; displayName: string }>;
 };
 
 export type BroadcastState = {
@@ -57,6 +67,11 @@ export type UiMessage =
   | { type: "pick-mask" }
   | { type: "cancel-mask-pick" }
   | { type: "open-audience" }
+  | { type: "open-remote-audience"; relayBase: string }
+  | { type: "end-remote-audience" }
+  | { type: "relay-signal"; to: string; from: string; data: unknown }
+  | { type: "relay-decide-viewer"; viewerId: string; approve: boolean }
+  | { type: "relay-kick-viewer"; viewerId: string }
   | { type: "authorize-capture" }
   | { type: "stage-laser"; laser: PresentationSession["laser"] }
   | { type: "demo-connector-state"; state: "ready" | "anonymous" }
@@ -73,6 +88,12 @@ export type UiMessage =
 
 export type BgMessage =
   | { type: "state"; state: BroadcastState }
+  | { type: "relay-opened"; room: RemoteAudienceState }
+  | { type: "relay-closed"; reason?: string }
+  | { type: "relay-signal"; to: string; from: string; data: unknown }
+  | { type: "relay-decide-viewer"; viewerId: string; approve: boolean }
+  | { type: "relay-kick-viewer"; viewerId: string }
+  | { type: "relay-viewer-pending"; viewerId: string; displayName: string }
   | { type: "laser"; laser: PresentationSession["laser"] }
   | { type: "origin-authorization-required"; origin: string | null; reason?: string }
   | { type: "capture-start"; streamId: string; tabId: number }

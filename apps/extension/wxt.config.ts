@@ -21,6 +21,9 @@ export default defineConfig({
       "offscreen"
     ],
     optional_host_permissions: ["http://*/*", "https://*/*"],
+    // Loopback relay endpoints must be reachable from the service worker
+    // without an interactive grant (fetch from SW ignores optional grants).
+    host_permissions: ["http://127.0.0.1/*"],
     icons: {
       16: "icons/icon-16.png",
       32: "icons/icon-32.png",

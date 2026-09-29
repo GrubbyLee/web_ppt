@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Showit 观众屏</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, "Noto Sans SC", system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #0d1015; color: #f5f8fb; }
+    body { display: flex; align-items: center; justify-content: center; }
+    .stage { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+    video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; text-align: center; padding: 24px; z-index: 5; }
+    .cover--privacy { background: #172533; font-size: clamp(18px, 3vw, 30px); font-weight: 600; }
+    .cover--ended { background: #172533; }
+    .cover--ended h1 { margin: 0; font-size: clamp(26px, 4vw, 48px); }
+    .cover--ended p { margin: 0; color: #b9c4cf; }
+    .state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; color: #91a0b0; z-index: 6; background: rgba(5,6,7,.72); }
+    .state h1 { margin: 0; color: #f5f8fb; font-size: clamp(18px, 3vw, 28px); }
+    .badge { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 10px; padding: 5px 12px; border-radius: 999px; background: rgba(5,6,7,.65); color: #b9c4cf; font-size: 12px; z-index: 7; }
+    .annotation { position: absolute; border: 4px solid #f4b44d; border-radius: 50%; box-shadow: 0 0 0 3px rgba(5,6,7,.55); z-index: 8; pointer-events: none; }
+    .laser { position: absolute; width: 22px; height: 22px; border-radius: 50%; background: #ff5f6d; box-shadow: 0 0 20px 8px rgba(255,95,109,.55); transform: translate(-50%,-50%); opacity: 0; transition: opacity 120ms linear; z-index: 9; pointer-events: none; }
+    .mask { position: absolute; background: #111820; z-index: 4; pointer-events: none; }
+    .mask.is-blur { backdrop-filter: blur(18px); background: rgba(10,15,20,.45); }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <main class="stage" id="stage">
+    <video id="video" autoplay muted playsinline></video>
+    <div class="state" id="state">
+      <h1>Showit 观众屏</h1>
+      <p id="stateText">正在连接演示画面…</p>
+    </div>
+    <div class="cover cover--privacy hidden" id="privacyCover">画面已保护</div>
+    <div class="cover cover--ended hidden" id="endedCover">
+      <h1 id="endTitle">演示结束</h1>
+      <p id="endDescription">感谢观看</p>
+    </div>
+    <div id="masks"></div>
+    <div id="circles"></div>
+    <div class="laser" id="laser"></div>
+    <footer class="badge hidden" id="badge">
+      <span id="projectName"></span>
+      <span id="pageNo"></span>
+    </footer>
+  </main>
+  <script>
+    (function () {
+      var roomCode = "__ROOM_CODE__";
+      // The viewer token travels in the URL fragment: it never leaves the
+      // browser toward any server except the relay's own endpoints.
+      var fragment = location.hash.replace(/^#/, "");
+      var viewerToken = null;
+      try {
+        var parsed = JSON.parse(decodeURIComponent(fragment));
+        if (parsed && typeof parsed.t === "string") viewerToken = parsed.t;
+      } catch (error) {
+        var match = fragment.match(/t=([A-Za-z0-9_-]+)/);
+        if (match) viewerToken = match[1];
+      }
+      if (!viewerToken) {
+        setText("缺少观众令牌，请使用演讲者分享的完整链接。");
+        return;
+      }
+
+      var snapshot = null;
+      var peer = null;
+      var laserTimer = null;
+      var roomEnded = false;
+
+      function el(id) { return document.getElementById(id); }
+      function setText(text) { el("stateText").textContent = text; el("state").classList.remove("hidden"); }
+      function clearState() { el("state").classList.add("hidden"); }
+      function showCover(which) {
+        el("privacyCover").classList.toggle("hidden", which !== "privacy");
+        el("endedCover").classList.toggle("hidden", which !== "ended");
+      }
+
+      function applySnapshot(next) {
+        if (roomEnded) return; // The room ended; the final state stays.
+        snapshot = next || {};
+        var brand = snapshot.brand || {};
+        document.title = brand.audienceTitle || "Showit 观众屏";
+        if (brand.privacyMessage) el("privacyCover").textContent = brand.privacyMessage;
+        if (brand.endTitle) el("endTitle").textContent = brand.endTitle;
+        if (brand.endDescription) el("endDescription").textContent = brand.endDescription;
+
+        var mode = snapshot.screenMode || "privacy";
+        var offline = snapshot.offlineFallbackActive === true;
+        if (mode === "ended") { showCover("ended"); clearState(); return; }
+        if (mode === "privacy" || offline) { showCover("privacy"); clearState(); return; }
+        showCover(null);
+
+        var masks = el("masks");
+        masks.replaceChildren();
+        (snapshot.privacyMasks || []).forEach(function (mask) {
+          var box = document.createElement("div");
+          box.className = "mask" + (mask.mode === "blur" ? " is-blur" : "");
+          box.style.left = Math.min(mask.x1, mask.x2) * 100 + "%";
+          box.style.top = Math.min(mask.y1, mask.y2) * 100 + "%";
+          box.style.width = Math.abs(mask.x2 - mask.x1) * 100 + "%";
+          box.style.height = Math.abs(mask.y2 - mask.y1) * 100 + "%";
+          masks.appendChild(box);
+        });
+
+        var circles = el("circles");
+        circles.replaceChildren();
+        (snapshot.circles || []).forEach(function (circle) {
+          var ring = document.createElement("div");
+          ring.className = "annotation";
+          ring.style.left = Math.min(circle.x1, circle.x2) * 100 + "%";
+          ring.style.top = Math.min(circle.y1, circle.y2) * 100 + "%";
+          ring.style.width = Math.abs(circle.x2 - circle.x1) * 100 + "%";
+          ring.style.height = Math.abs(circle.y2 - circle.y1) * 100 + "%";
+          circles.appendChild(ring);
+        });
+
+        el("projectName").textContent = snapshot.projectName || "";
+        el("pageNo").textContent = snapshot.pageLabel || "";
+        el("badge").classList.toggle("hidden", !snapshot.projectName);
+      }
+
+      function connectEvents() {
+        var source = new EventSource("/events/" + roomCode + "/" + viewerToken);
+        source.addEventListener("snapshot", function (event) {
+          try { applySnapshot(JSON.parse(event.data)); } catch (error) { /* malformed */ }
+        });
+        source.addEventListener("viewer-state", function (event) {
+          try {
+            var data = JSON.parse(event.data);
+            if (data.status === "disconnected") setText("连接中断，正在重连…");
+          } catch (error) { /* ignore */ }
+        });
+        source.addEventListener("room-ended", function () {
+          roomEnded = true;
+          setText("演示已结束。");
+          showCover("ended");
+        });
+        source.onerror = function () {
+          // After a room ends the reconnect gets a 404 (readyState CLOSED).
+          if (source.readyState === EventSource.CLOSED) {
+            if (!roomEnded) {
+              roomEnded = true;
+              setText("演示已结束或连接不可用。");
+              showCover("ended");
+            }
+            return;
+          }
+          // Transient disconnects keep the last frame; nudge the state text.
+          if (!roomEnded) setText("连接中断，正在重连…");
+        };
+      }
+
+      function ensurePeer() {
+        if (peer) return;
+        var peerId = "viewer-" + Math.random().toString(36).slice(2, 10);
+        var socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/signal/" + roomCode + "/" + viewerToken + "/viewer/" + peerId);
+
+        socket.onopen = function () {
+          peer = { socket: socket, peerId: peerId, pc: null };
+          setText("已连接中继，等待演示画面…");
+        };
+        socket.onclose = function (event) {
+          peer = null;
+          if (event.code === 4002) { setText("等待演讲者批准…"); return; }
+          if (event.code === 4003) { setText("演讲者已断开本观众。"); return; }
+          if (event.code === 4004) { setText("演示已结束。"); return; }
+          setText("连接中断，正在重连…");
+          setTimeout(ensurePeer, 1000);
+        };
+        socket.onmessage = function (event) {
+          var message;
+          try { message = JSON.parse(event.data); } catch (error) { return; }
+          if (!peer) return;
+          if (message.type === "offer" && message.description) {
+            var pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+            peer.pc = pc;
+            pc.ontrack = function (trackEvent) {
+              var video = el("video");
+              video.srcObject = trackEvent.streams[0] || null;
+              video.play().catch(function () { /* autoplay guard */ });
+              clearState();
+            };
+            pc.onicecandidate = function (iceEvent) {
+              if (iceEvent.candidate && peer && peer.socket.readyState === 1) {
+                peer.socket.send(JSON.stringify({ type: "ice", to: "publisher", from: peer.peerId, candidate: iceEvent.candidate }));
+              }
+            };
+            pc.setRemoteDescription(message.description).then(function () {
+              return pc.createAnswer();
+            }).then(function (answer) {
+              return pc.setLocalDescription(answer);
+            }).then(function () {
+              if (peer && peer.socket.readyState === 1) {
+                peer.socket.send(JSON.stringify({ type: "answer", to: "publisher", from: peer.peerId, description: peer.pc.localDescription }));
+              }
+            }).catch(function () { setText("画面协商失败，正在重试…"); });
+            return;
+          }
+          if (message.type === "ice" && message.candidate && peer && peer.pc) {
+            peer.pc.addIceCandidate(message.candidate).catch(function () { /* stale candidate */ });
+            return;
+          }
+          if (message.type === "laser" && message.laser) {
+            var dot = el("laser");
+            dot.style.left = message.laser.x * 100 + "%";
+            dot.style.top = message.laser.y * 100 + "%";
+            dot.style.opacity = "1";
+            if (laserTimer) clearTimeout(laserTimer);
+            laserTimer = setTimeout(function () { dot.style.opacity = "0"; }, Math.max(0, (message.laser.expiresAt || 0) - Date.now()));
+          }
+        };
+      }
+
+      fetch("/watch/" + roomCode + "/bootstrap").then(function (response) {
+        if (!response.ok) throw new Error("room");
+        return response.json();
+      }).then(function () {
+        connectEvents();
+        ensurePeer();
+      }).catch(function () {
+        setText("房间不存在或已结束。");
+      });
+    })();
+  </script>
+</body>
+</html>

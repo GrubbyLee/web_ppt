@@ -1,0 +1,24 @@
+{
+  "name": "@showit/relay",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Showit audience relay: LAN/WAN watch pages for read-only audience screens",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node --experimental-strip-types src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0",
+    "ws": "^8.18.3"
+  },
+  "dependencies": {
+    "@showit/contracts": "*"
+  }
+}

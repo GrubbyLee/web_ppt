@@ -31,6 +31,7 @@ jobs:
           xvfb-run -a npm run test:extension-browser
           xvfb-run -a npm run test:extension-e2e
           xvfb-run -a npm run test:extension-demo-e2e
+          xvfb-run -a npm run test:remote-e2e
 
   extension:
     needs: quality

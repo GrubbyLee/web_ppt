@@ -473,3 +473,51 @@
   font-size: 11px;
   text-align: center;
 }
+
+/* ---- remote audience (relay) ---- */
+
+.panel-relay__link {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-700);
+  border-radius: 8px;
+  background: var(--ink-950);
+  overflow-wrap: anywhere;
+}
+
+.panel-relay__link code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--signal-teal);
+}
+
+.panel-relay__hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted-400);
+  line-height: 1.6;
+}
+
+.panel-relay__pending {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px dashed var(--line-700);
+  padding-top: 8px;
+}
+
+.panel-relay__pending h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.panel-relay__pending > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-relay__pending > div > span {
+  flex: 1;
+  font-size: 12.5px;
+}

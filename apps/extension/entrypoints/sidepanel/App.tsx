@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browser } from "wxt/browser";
 import type { Browser } from "wxt/browser";
 import type { PresentationSession, PresentationStep, SensitiveRuntimeVariable } from "@showit/contracts";
-import type { BgMessage, BroadcastState, UiMessage } from "@/messaging/protocol";
+import type { BgMessage, BroadcastState, RemoteAudienceState, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 import type { SessionAction } from "@/session/machine";
 import { elapsedMs, sectionElapsedMs, autoAdvanceElapsedMs } from "@/session/machine";
@@ -32,7 +32,7 @@ import {
   TriangleAlert
 } from "lucide-react";
 
-type DialogKind = "high-risk" | "force-complete" | "secrets" | "offline-origin" | "rehearsal-note" | "settings" | "shortcuts" | null;
+type DialogKind = "high-risk" | "force-complete" | "secrets" | "offline-origin" | "rehearsal-note" | "relay" | "settings" | "shortcuts" | null;
 
 export function App() {
   const [state, setState] = useState<BroadcastState | null>(null);
@@ -46,6 +46,8 @@ export function App() {
   const [health, setHealth] = useState<Array<{ pageId: string; ok: boolean; status: number | null; error: string | null; elapsedMs: number }>>([]);
   const [healthBusy, setHealthBusy] = useState(false);
   const [diagnosticEntries, setDiagnosticEntries] = useState<Array<{ traceId: string; at: number; area: string; message: string }>>([]);
+  const [relayBase, setRelayBase] = useState("");
+  const [relayCopied, setRelayCopied] = useState(false);
   const portRef = useRef<Browser.runtime.Port | null>(null);
   const notesEditingRef = useRef(false);
   notesEditingRef.current = notesEditing || dialog !== null;
@@ -103,6 +105,13 @@ export function App() {
         // Already disconnected.
       }
     };
+  }, []);
+
+  useEffect(() => {
+    void browser.storage.local.get("showit:relay-base:v1").then((stored) => {
+      const value = (stored as Record<string, unknown>)["showit:relay-base:v1"];
+      if (typeof value === "string" && value.trim()) setRelayBase(value.trim());
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -416,6 +425,23 @@ export function App() {
           <ToolbarButton icon="❄" title="冻结画面（F）" active={session.screenMode === "frozen"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "frozen" ? "normal" : "frozen" })} />
           <ToolbarButton icon={<TriangleAlert size={14} />} title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
           <ToolbarButton icon={<MonitorPlay size={14} />} label="观众屏" onClick={() => send({ type: "open-audience" })} />
+          <ToolbarButton
+            icon="🌐"
+            label={meta.remote ? `远程 ${meta.remote.viewerCount}` : "远程观众"}
+            title={meta.remote ? "管理远程观众（链接/批准/结束）" : "通过中继开启局域网/公网观众"}
+            active={Boolean(meta.remote)}
+            onClick={() => {
+              if (meta.remote) {
+                setDialog("relay");
+                return;
+              }
+              if (!relayBase.trim()) {
+                setDialog("relay");
+                return;
+              }
+              send({ type: "open-remote-audience", relayBase: relayBase.trim() });
+            }}
+          />
           {meta.viewerCount >= 0 && machine.localAudience && !meta.captureActive ? <ToolbarButton icon={<MonitorPlay size={14} />} label="授权画面捕获" title="捕获需要页面手势授权（右键菜单或 Ctrl+Shift+9）；此按钮在授权后重试" onClick={() => send({ type: "authorize-capture" })} /> : null}
           <ToolbarButton icon={<Settings size={14} />} title="设置" onClick={() => setDialog("settings")} />
           <ToolbarButton icon={<Power size={14} />} label="结束" variant="danger" onClick={() => send({ type: "end-session" })} />
@@ -481,6 +507,33 @@ export function App() {
             act({ type: "finish-rehearsal", note: rehearsalNote });
             setDialog(null);
           }}
+        />
+      ) : null}
+
+      {dialog === "relay" ? (
+        <RelayDialog
+          value={relayBase}
+          onChange={setRelayBase}
+          remote={meta.remote}
+          copied={relayCopied}
+          onCopied={() => setRelayCopied(true)}
+          onOpen={() => {
+            if (!relayBase.trim()) return;
+            void browser.storage.local.set({ "showit:relay-base:v1": relayBase.trim() });
+            send({ type: "open-remote-audience", relayBase: relayBase.trim() });
+            setDialog(null);
+          }}
+          onEnd={() => {
+            send({ type: "end-remote-audience" });
+            setDialog(null);
+          }}
+          onCopy={() => {
+            void navigator.clipboard.writeText(meta.remote?.viewerLink ?? "").then(() => setRelayCopied(true));
+          }}
+          onApprove={(viewerId) => send({ type: "relay-decide-viewer", viewerId, approve: true })}
+          onReject={(viewerId) => send({ type: "relay-decide-viewer", viewerId, approve: false })}
+          onKick={(viewerId) => send({ type: "relay-kick-viewer", viewerId })}
+          onClose={() => setDialog(null)}
         />
       ) : null}
 
@@ -656,6 +709,65 @@ function SettingsDrawer({ project, currentPage, preflight, health, healthBusy, d
           {diagnostics.slice(0, 5).map((entry) => <p key={entry.traceId}><small>{new Date(entry.at).toLocaleTimeString("zh-CN")} · {entry.area}</small> {entry.message}</p>)}
         </section>
       ) : null}
+    </Dialog>
+  );
+}
+
+function RelayDialog({ value, onChange, remote, copied, onCopied, onOpen, onEnd, onCopy, onApprove, onReject, onKick, onClose }: {
+  value: string;
+  onChange: (value: string) => void;
+  remote: RemoteAudienceState | null;
+  copied: boolean;
+  onCopied: () => void;
+  onOpen: () => void;
+  onEnd: () => void;
+  onCopy: () => void;
+  onApprove: (viewerId: string) => void;
+  onReject: (viewerId: string) => void;
+  onKick: (viewerId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog title="远程观众（局域网 / 公网）" onClose={onClose}>
+      {remote ? (
+        <>
+          <p>房间已开启。把下面的链接发给观众（也可用二维码工具生成）：</p>
+          <p className="panel-relay__link"><code>{remote.viewerLink}</code></p>
+          <div className="dialog__actions">
+            <ToolbarButton icon="⧉" label={copied ? "已复制" : "复制链接"} onClick={() => { onCopy(); onCopied(); }} />
+            <ToolbarButton icon="✕" label="结束远程观众" variant="danger" onClick={onEnd} />
+          </div>
+          {remote.pending.length > 0 ? (
+            <section className="panel-relay__pending" aria-label="等待批准的观众">
+              <h3>等待批准</h3>
+              {remote.pending.map((viewer) => (
+                <div key={viewer.viewerId}>
+                  <span>{viewer.displayName}</span>
+                  <ToolbarButton icon="✓" label="批准" variant="primary" onClick={() => onApprove(viewer.viewerId)} />
+                  <ToolbarButton icon="✕" label="拒绝" onClick={() => onReject(viewer.viewerId)} />
+                </div>
+              ))}
+            </section>
+          ) : null}
+          {remote.viewerCount > 0 ? (
+            <p>当前远程观众 {remote.viewerCount} 人（在设置中可断开）。</p>
+          ) : (
+            <p>还没有观众加入。</p>
+          )}
+        </>
+      ) : (
+        <>
+          <p>填写观众中继服务地址。局域网部署在内网主机，公网部署使用域名（HTTPS）。</p>
+          <label className="field">
+            <span>中继地址（如 http://192.168.1.10:8787 或 https://demo.example.com）</span>
+            <input autoFocus value={value} placeholder="http://192.168.1.10:8787" onChange={(event) => onChange(event.target.value)} />
+          </label>
+          <div className="dialog__actions">
+            <ToolbarButton icon="🌐" label="开启远程观众" variant="primary" disabled={!value.trim().startsWith("http")} onClick={onOpen} />
+          </div>
+          <p className="panel-relay__hint">中继服务随 Showit 交付（apps/relay），一条 Docker 命令即可部署；观众无需安装任何软件。</p>
+        </>
+      )}
     </Dialog>
   );
 }

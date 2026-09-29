@@ -9,6 +9,8 @@ let audienceStream: MediaStream | null = null;
 let compositor: { stream: MediaStream; stop(): void } | null = null;
 let latest: CompositorState & { captureUnsafe: boolean } = { screenMode: "privacy", offlineFallbackActive: true, privacyMasks: [], captureUnsafe: true };
 const peers = new Map<string, RTCPeerConnection>();
+/** Remote (relay) viewers: peerId → connection. Kept separate from loopback. */
+const relayPeers = new Map<string, RTCPeerConnection>();
 let port: Browser.runtime.Port | null = null;
 
 function post(message: UiMessage): void {
@@ -69,6 +71,7 @@ async function startCapture(streamId: string): Promise<void> {
     post({ type: "capture-state", active: true });
     for (const viewerId of pendingViewers) void addViewer(viewerId);
     pendingViewers.clear();
+    // Relay viewers reconnect on their next answer; nothing to do here.
     stream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => {
       if (captureStream === stream) stopCapture();
     }, { once: true }));
@@ -107,6 +110,68 @@ function handleSignal(from: string, data: { type?: string; sdp?: RTCSessionDescr
   if (data.type === "candidate" && data.candidate) void peer.addIceCandidate(data.candidate).catch(() => undefined);
 }
 
+// ---- relay (LAN/WAN) publisher ------------------------------------------------
+
+function postUi(message: UiMessage): void {
+  try {
+    port?.postMessage(message);
+  } catch {
+    // Background reconnects.
+  }
+}
+
+function closeRelayPeer(peerId: string): void {
+  const peer = relayPeers.get(peerId);
+  if (!peer) return;
+  relayPeers.delete(peerId);
+  try { peer.close(); } catch { /* already closed */ }
+}
+
+function closeAllRelayPeers(): void {
+  for (const peerId of [...relayPeers.keys()]) closeRelayPeer(peerId);
+}
+
+async function addRelayPeer(peerId: string): Promise<void> {
+  if (relayPeers.has(peerId) || !audienceStream) return;
+  const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  relayPeers.set(peerId, peer);
+  audienceStream.getTracks().forEach((track) => peer.addTrack(track, audienceStream!));
+  peer.onicecandidate = (event) => {
+    if (event.candidate) postUi({ type: "relay-signal", to: peerId, from: "publisher", data: { type: "ice", candidate: event.candidate } });
+  };
+  peer.onconnectionstatechange = () => {
+    if (["failed", "closed", "disconnected"].includes(peer.connectionState)) closeRelayPeer(peerId);
+  };
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  const description = peer.localDescription ?? offer;
+  postUi({ type: "relay-signal", to: peerId, from: "publisher", data: { type: "offer", description } });
+}
+
+function handleRelaySignal(from: string, data: { type?: string; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }): void {
+  if (!data || typeof data.type !== "string") return;
+  if (data.type === "offer") {
+    // Viewers never send offers through the relay (the publisher does).
+    return;
+  }
+  if (data.type === "answer" && data.description) {
+    const description = data.description;
+    void relayPeers.get(from)?.setRemoteDescription(description).catch(() => undefined);
+    return;
+  }
+  if (data.type === "ice" && data.candidate) {
+    void relayPeers.get(from)?.addIceCandidate(data.candidate).catch(() => undefined);
+    return;
+  }
+}
+
+async function addRelayPeerIfMissing(peerId: string): Promise<void> {
+  if (relayPeers.has(peerId)) return;
+  // The relay forwards viewer answers only after our offer, so a stray
+  // answer implies we restarted — rebuild the peer.
+  await addRelayPeer(peerId);
+}
+
 function connectPort(): void {
   const next = browser.runtime.connect({ name: `${PORT_PREFIX}offscreen` });
   port = next;
@@ -116,6 +181,8 @@ function connectPort(): void {
     setTimeout(connectPort, 500);
   });
   next.onMessage.addListener((message: BgMessage) => {
+    if (message.type === "relay-signal") handleRelaySignal(message.from, message.data as { type?: string; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit });
+    if (message.type === "relay-closed") closeAllRelayPeers();
     if (message.type === "capture-start") void startCapture(message.streamId);
     if (message.type === "capture-stop") stopCapture();
     if (message.type === "viewer-added") void addViewer(message.viewerId);

@@ -17,7 +17,7 @@ import { redactExtensionDiagnostic } from "@/lib/redact";
 import { kvSessionGet, kvSessionRemove, kvSessionSet } from "@/lib/kv";
 import { loadWorkspace, saveRehearsal, saveWorkspace } from "@/lib/persistence";
 import { projectTrustState } from "@/lib/project-trust";
-import type { BgMessage, BroadcastMeta, BroadcastState, ConnectorRuntimeState, OverlayState, StepExecutionStatus, UiMessage } from "@/messaging/protocol";
+import type { BgMessage, BroadcastMeta, BroadcastState, ConnectorRuntimeState, OverlayState, RemoteAudienceState, StepExecutionStatus, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 
 const MACHINE_SNAPSHOT_KEY = "showit:machine-snapshot:v1";
@@ -60,6 +60,13 @@ const audienceWindows = new Map<string, number>();
 let captureActive = false;
 /** Demo-console mutations replicated to the audience mirror (cross-document). */
 let demoMutations: BroadcastMeta["demoMutations"] = [];
+
+/** Remote audience room (LAN/WAN relay). Null while only local windows run. */
+let remoteRoom: RemoteAudienceState | null = null;
+let relaySignalSocket: WebSocket | null = null;
+/** Registered by the background runtime so module-scope relay code can
+ *  trigger a capture start for real business tabs. */
+let startCaptureHook: (() => Promise<void>) | null = null;
 let offscreenReady = false;
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 let boundMaskResolveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -207,11 +214,217 @@ function broadcastMeta(): BroadcastMeta {
     missingSecrets: missingSecrets(),
     recorderActive: recorder !== null,
     captureActive,
-    viewerCount: [...viewers.values()].filter((viewer) => viewer.status === "connected").length,
+    viewerCount: [...viewers.values()].filter((viewer) => viewer.status === "connected").length + (remoteRoom?.viewerCount ?? 0),
+    remote: remoteRoom,
     offlineOriginRequest: runtime.offlineOriginRequest,
     message: runtime.message,
     demoMutations
   };
+}
+
+// ---- remote audience (LAN/WAN relay) --------------------------------------
+
+function relaySnapshot(): Record<string, unknown> {
+  if (!machine) return {};
+  const page = machine.project.pages[machine.session.currentPageIndex];
+  return {
+    projectName: machine.project.name,
+    pageLabel: `${machine.session.currentPageIndex + 1} / ${machine.project.pages.length}`,
+    screenMode: machine.session.screenMode,
+    offlineFallbackActive: machine.session.offlineFallbackPageId === page?.id,
+    privacyMasks: page?.privacyMasks ?? [],
+    circles: machine.session.circles,
+    brand: {
+      audienceTitle: machine.project.brand.audienceTitle,
+      privacyMessage: machine.project.brand.privacyMessage,
+      endTitle: machine.project.brand.endTitle,
+      endDescription: machine.project.brand.endDescription
+    }
+  };
+}
+
+let relaySnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRelaySnapshot(): void {
+  if (!remoteRoom) return;
+  if (relaySnapshotTimer) return;
+  relaySnapshotTimer = setTimeout(() => {
+    relaySnapshotTimer = null;
+    if (!remoteRoom) return;
+    void fetch(`${relayBaseForRoom()}/api/rooms/${remoteRoom.roomCode}/snapshot`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-presenter-token": relayPresenterToken },
+      body: JSON.stringify(relaySnapshot())
+    }).catch((error) => recordDiagnostic("推送观众快照", error));
+  }, 250);
+}
+
+let relayPresenterToken = "";
+let relayBase = "";
+
+function relayBaseForRoom(): string {
+  return relayBase.replace(/\/$/, "");
+}
+
+function closeRelaySocket(reason?: string): void {
+  if (relaySignalSocket) {
+    try { relaySignalSocket.close(); } catch { /* already closed */ }
+    relaySignalSocket = null;
+  }
+  postToContext("offscreen", { type: "relay-closed", ...(reason ? { reason } : {}) });
+}
+
+async function pollRelayViewers(): Promise<void> {
+  if (!remoteRoom) return;
+  try {
+    const response = await fetch(`${relayBaseForRoom()}/api/rooms/${remoteRoom.roomCode}/viewers`, {
+      headers: { "x-presenter-token": relayPresenterToken }
+    });
+    if (response.status === 404) {
+      remoteRoom = null;
+      closeRelaySocket("房间已失效");
+      runtime.message = "远程观众房间已失效。";
+      broadcastState();
+      return;
+    }
+    if (!response.ok) return;
+    const body = await response.json() as { viewers: Array<{ viewerId: string; displayName: string; status: string }> };
+    remoteRoom = {
+      ...remoteRoom,
+      viewerCount: body.viewers.filter((viewer) => viewer.status === "connected").length,
+      pending: body.viewers.filter((viewer) => viewer.status === "pending").map((viewer) => ({ viewerId: viewer.viewerId, displayName: viewer.displayName }))
+    };
+    broadcastState();
+  } catch {
+    // Transient relay errors surface via the next poll.
+  }
+}
+
+let relayPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureRelayPolling(): void {
+  if (relayPollTimer || !remoteRoom) return;
+  relayPollTimer = setInterval(() => {
+    void pollRelayViewers();
+  }, 2_000);
+  relayPollTimer.unref?.();
+}
+
+function stopRelayPolling(): void {
+  if (relayPollTimer) {
+    clearInterval(relayPollTimer);
+    relayPollTimer = null;
+  }
+}
+
+async function openRemoteAudience(relayBaseInput: string): Promise<void> {
+  if (!machine) return;
+  if (remoteRoom) {
+    runtime.message = "远程观众房间已开启。";
+    broadcastState();
+    return;
+  }
+  const base = relayBaseInput.trim().replace(/\/$/, "");
+  if (!/^https?:\/\/[a-z0-9.:-]+$/i.test(base)) {
+    runtime.message = "中继地址无效，应形如 http://192.168.1.10:8787 。";
+    broadcastState();
+    return;
+  }
+  relayBase = base;
+  try {
+    const response = await fetch(`${base}/api/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ capacity: machine.project.audienceCapacityMode === "sfu-20" ? "sfu" : "p2p", joinMode: machine.project.audienceJoinMode })
+    });
+    if (!response.ok) {
+      runtime.message = `中继拒绝创建房间（HTTP ${response.status}）。`;
+      broadcastState();
+      return;
+    }
+    const room = await response.json() as { roomCode: string; viewerLink: string; presenterToken: string; capacity: string; joinMode: string };
+    relayPresenterToken = room.presenterToken;
+    remoteRoom = {
+      roomCode: room.roomCode,
+      viewerLink: room.viewerLink,
+      capacity: room.capacity === "sfu" ? "sfu" : "p2p",
+      joinMode: room.joinMode === "approval" ? "approval" : "direct",
+      viewerCount: 0,
+      pending: []
+    };
+    await fetch(`${base}/api/rooms/${room.roomCode}/snapshot`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-presenter-token": relayPresenterToken },
+      body: JSON.stringify(relaySnapshot())
+    }).catch(() => undefined);
+
+    // Presenter signaling socket: viewers' offers/answers/ice arrive here
+    // and are forwarded to the offscreen publisher.
+    const signalUrl = `${base.replace(/^http/, "ws")}/signal/${room.roomCode}/${room.presenterToken}/presenter/publisher-1`;
+    const socket = new WebSocket(signalUrl);
+    relaySignalSocket = socket;
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as { type?: string; from?: string; to?: string; description?: unknown; candidate?: unknown };
+        if (message.type === "answer" || message.type === "ice") {
+          postToContext("offscreen", { type: "relay-signal", to: message.to ?? "publisher", from: message.from ?? "", data: message });
+        }
+      } catch {
+        // Ignore malformed relay payloads.
+      }
+    };
+    socket.onclose = () => {
+      if (relaySignalSocket === socket) relaySignalSocket = null;
+    };
+
+    ensureRelayPolling();
+    runtime.message = `远程观众已开启：${room.viewerLink}`;
+    broadcastState();
+    postToContext("sidepanel", { type: "relay-opened", room: remoteRoom });
+    // Start capture for real business tabs so remote viewers get video.
+    if (runtime.tabKind === "business" && startCaptureHook) await startCaptureHook();
+  } catch (error) {
+    recordDiagnostic("连接中继", error);
+    runtime.message = "无法连接中继服务，请检查地址与网络。";
+    broadcastState();
+  }
+}
+
+async function endRemoteAudience(): Promise<void> {
+  const room = remoteRoom;
+  remoteRoom = null;
+  stopRelayPolling();
+  if (relaySnapshotTimer) {
+    clearTimeout(relaySnapshotTimer);
+    relaySnapshotTimer = null;
+  }
+  closeRelaySocket("演示者结束远程观众");
+  if (room) {
+    await fetch(`${relayBaseForRoom()}/api/rooms/${room.roomCode}`, {
+      method: "DELETE",
+      headers: { "x-presenter-token": relayPresenterToken }
+    }).catch(() => undefined);
+  }
+  broadcastState();
+}
+
+async function decideRemoteViewer(viewerId: string, approve: boolean): Promise<void> {
+  if (!remoteRoom) return;
+  await fetch(`${relayBaseForRoom()}/api/rooms/${remoteRoom.roomCode}/viewers/${viewerId}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-presenter-token": relayPresenterToken },
+    body: JSON.stringify({ approve })
+  }).catch(() => undefined);
+  await pollRelayViewers();
+}
+
+async function kickRemoteViewer(viewerId: string): Promise<void> {
+  if (!remoteRoom) return;
+  await fetch(`${relayBaseForRoom()}/api/rooms/${remoteRoom.roomCode}/viewers/${viewerId}`, {
+    method: "DELETE",
+    headers: { "x-presenter-token": relayPresenterToken }
+  }).catch(() => undefined);
+  await pollRelayViewers();
 }
 
 function broadcastState(): void {
@@ -220,6 +433,7 @@ function broadcastState(): void {
   postToAll({ type: "state", state });
   void syncOverlay();
   scheduleSnapshot();
+  scheduleRelaySnapshot();
 }
 
 function postToAll(message: BgMessage): void {
@@ -770,6 +984,10 @@ export default defineBackground(() => {
     postToContext("offscreen", message);
   }
 
+  startCaptureHook = async () => {
+    if (runtime.tabKind === "business") await startCapture();
+  };
+
   async function startCapture(): Promise<void> {
     if (!machine || runtime.sessionTabId === null || captureActive) return;
     // Demo and stage pages cannot be captured (experiment E3); the audience
@@ -797,7 +1015,7 @@ export default defineBackground(() => {
     await closeOffscreen();
   }
 
-  function openAudienceWindow(): void {
+    function openAudienceWindow(): void {
     if (!machine) return;
     const viewerId = `viewer-${Math.random().toString(36).slice(2, 10)}`;
     const url = `${browser.runtime.getURL("/audience.html")}?viewer=${viewerId}`;
@@ -958,6 +1176,7 @@ export default defineBackground(() => {
     const runtimeSession = finalMachine.session;
     machine = null;
     await stopRecorder();
+    await endRemoteAudience();
     for (const viewerId of [...viewers.keys()]) {
       const entry = [...uiPorts].find((item) => item.ctx === "audience" && item.viewerId === viewerId);
       if (entry) {
@@ -1098,6 +1317,25 @@ export default defineBackground(() => {
         return;
       case "open-audience":
         openAudienceWindow();
+        return;
+      case "open-remote-audience":
+        await openRemoteAudience(message.relayBase);
+        return;
+      case "end-remote-audience":
+        await endRemoteAudience();
+        return;
+      case "relay-signal": {
+        // Offscreen publisher → relay viewer (offer/ice fan-out).
+        if (relaySignalSocket && relaySignalSocket.readyState === WebSocket.OPEN) {
+          relaySignalSocket.send(JSON.stringify({ ...message.data as Record<string, unknown>, from: "publisher-1" }));
+        }
+        return;
+      }
+      case "relay-decide-viewer":
+        await decideRemoteViewer(message.viewerId, message.approve);
+        return;
+      case "relay-kick-viewer":
+        await kickRemoteViewer(message.viewerId);
         return;
       case "authorize-capture":
         await authorizeCapture();
