@@ -128,7 +128,9 @@ function connectPort(): void {
         screenMode: machine.session.screenMode,
         offlineFallbackActive: machine.session.offlineFallbackPageId !== null && machine.session.offlineFallbackPageId === page?.id,
         privacyMasks: sanitizeAudienceMasks(page?.privacyMasks ?? []),
-        captureUnsafe: message.state.meta.tabUnsafeOrigin === true
+        // Blocked = sensitive inputs (password/MFA/file) or origin mismatch —
+        // the audience must never watch credentials being entered.
+        captureUnsafe: message.state.meta.tabUnsafeOrigin === true || message.state.meta.connectorState?.state === "blocked"
       };
     }
   });

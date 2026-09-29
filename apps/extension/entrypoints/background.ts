@@ -1187,14 +1187,22 @@ export default defineBackground(() => {
       return false;
     }
     if (typed.type === "showit-privacy-risk") {
-      const payload = typed as unknown as { origin: string; privacyRisk: string };
+      const payload = typed as unknown as { origin: string; privacyRisk: string | null };
       const isSessionTab = sender.tab?.id === runtime.sessionTabId;
       if (!machine || !isSessionTab || !isAllowedOrigin(payload.origin)) return false;
-      if (payload.privacyRisk === "file") {
-        runtime.connectorState = { state: "blocked", reason: "业务页包含文件上传等敏感输入。" };
-      } else {
-        runtime.connectorState = { state: "anonymous", reason: "业务页包含登录或敏感输入。" };
+      if (payload.privacyRisk === null) {
+        // The sensitive input disappeared (SPA login completed): re-probe so
+        // the audience cover lifts instead of sticking until the next
+        // navigation.
+        if (runtime.tabKind === "business") void probeSessionTab();
+        return false;
       }
+      // Any live password/MFA/file input forces the audience into the privacy
+      // cover (the presenter's tab stays visible so they can operate it).
+      runtime.connectorState = {
+        state: "blocked",
+        reason: payload.privacyRisk === "file" ? "业务页包含文件上传等敏感输入，观众画面已进入隐私保护。" : "业务页包含登录或敏感输入，观众画面已进入隐私保护。"
+      };
       broadcastState();
       return false;
     }

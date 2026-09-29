@@ -18,22 +18,26 @@ const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 manifest.host_permissions = [`http://127.0.0.1:${businessPort}/*`];
 await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 
-const businessHtml = `<!doctype html>
+const businessHtml = (requestUrl) => {
+  const showLogin = new URL(requestUrl, `http://127.0.0.1:${businessPort}`).searchParams.get("login") === "1";
+  return `<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>LCAPIM 控制台</title></head>
 <body>
   <main>
     <h1>能力开放平台</h1>
+    ${showLogin ? '<label>登录密码 <input id="login-password" type="password" autocomplete="current-password"></label>' : ""}
     <label>搜索 <input id="api-search" data-testid="api-search" autocomplete="off"></label>
     <button type="button" data-testid="publish-api" aria-label="发布能力">发布能力</button>
     <p id="status-line">就绪</p>
   </main>
 </body>
 </html>`;
+};
 
 const server = createServer((request, response) => {
   response.setHeader("content-type", "text/html; charset=utf-8");
-  response.end(businessHtml);
+  response.end(businessHtml(request.url ?? "/"));
 });
 await new Promise((resolvePromise) => server.listen(businessPort, "127.0.0.1", resolvePromise));
 
@@ -155,6 +159,15 @@ try {
   assert(await sidepanel.isVisible("text=6/18"), "回到第 6/18 页");
   const businessUrl = businessPage ? await businessPage.url() : "";
   assert(businessUrl.includes("view="), `会话标签保持业务页面（${businessUrl}）`);
+
+  console.log("5b) 登录表单的观众隐私保护");
+  const cleanBusinessUrl = businessPage.url();
+  await businessPage.goto(`${cleanBusinessUrl}&login=1`);
+  await sidepanel.waitForSelector("text=业务页包含登录或敏感输入", { timeout: 10_000 });
+  assert(true, "登录表单使侧边栏显示受阻（观众合成器进入隐私封面）");
+  await businessPage.goto(cleanBusinessUrl);
+  await sidepanel.waitForSelector("text=业务页就绪", { timeout: 10_000 });
+  assert(true, "敏感输入消失后自动恢复就绪（观众封面解除）");
 
   console.log("6) 观众窗口与画面授权");
   await sidepanel.getByTitle("观众屏").or(sidepanel.locator("button", { hasText: "观众屏" })).first().click({ timeout: 3_000 }).catch(async () => {

@@ -132,7 +132,11 @@ export default defineUnlistedScript(() => {
   function reportPrivacyRisk(): void {
     const risk = detectPrivacyRisk();
     if (!risk) {
+      if (lastPrivacyRisk === null) return;
       lastPrivacyRisk = null;
+      // The sensitive input disappeared — let the background re-probe so the
+      // audience privacy cover lifts.
+      void browser.runtime.sendMessage({ type: "showit-privacy-risk", origin: location.origin, privacyRisk: null }).catch(() => undefined);
       return;
     }
     if (risk === lastPrivacyRisk) return;
