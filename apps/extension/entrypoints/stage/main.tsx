@@ -40,19 +40,34 @@ function StageApp() {
     };
   }, []);
 
+  const laserSentAt = useRef(0);
+
   const onPointerMove = (event: React.PointerEvent) => {
     if (toolRef.current !== "laser" || event.pointerType !== "mouse") return;
     const dot = laserRef.current;
     if (!dot) return;
     const width = Math.max(1, window.innerWidth);
     const height = Math.max(1, window.innerHeight);
-    dot.style.left = `${Math.max(0, Math.min(1, event.clientX / width)) * 100}%`;
-    dot.style.top = `${Math.max(0, Math.min(1, event.clientY / height)) * 100}%`;
+    const x = Math.max(0, Math.min(1, event.clientX / width));
+    const y = Math.max(0, Math.min(1, event.clientY / height));
+    dot.style.left = `${x * 100}%`;
+    dot.style.top = `${y * 100}%`;
     dot.style.opacity = "1";
     if (laserExpiry.current) clearTimeout(laserExpiry.current);
     laserExpiry.current = setTimeout(() => {
       dot.style.opacity = "0";
     }, 1500);
+    // Relay to the audience windows at ~30Hz; business-page pointers travel
+    // inside the captured video, stage pages are not capturable.
+    const now = Date.now();
+    if (now - laserSentAt.current >= 33) {
+      laserSentAt.current = now;
+      try {
+        portRef.current?.postMessage({ type: "stage-laser", laser: { x, y, expiresAt: now + 1500 } } satisfies UiMessage);
+      } catch {
+        // Reload reconnects.
+      }
+    }
   };
 
   const onPointerDown = (event: React.PointerEvent) => {

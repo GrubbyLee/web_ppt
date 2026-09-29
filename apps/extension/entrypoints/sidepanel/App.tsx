@@ -416,7 +416,7 @@ export function App() {
           <ToolbarButton icon="❄" title="冻结画面（F）" active={session.screenMode === "frozen"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "frozen" ? "normal" : "frozen" })} />
           <ToolbarButton icon={<TriangleAlert size={14} />} title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
           <ToolbarButton icon={<MonitorPlay size={14} />} label="观众屏" onClick={() => send({ type: "open-audience" })} />
-          {meta.viewerCount >= 0 && machine.localAudience && !meta.captureActive ? <ToolbarButton icon={<MonitorPlay size={14} />} label="授权画面捕获" title="在演示画面标签上点击工具栏 Showit 图标后，也可在此授权捕获" onClick={() => send({ type: "authorize-capture" })} /> : null}
+          {meta.viewerCount >= 0 && machine.localAudience && !meta.captureActive ? <ToolbarButton icon={<MonitorPlay size={14} />} label="授权画面捕获" title="捕获需要页面手势授权（右键菜单或 Ctrl+Shift+9）；此按钮在授权后重试" onClick={() => send({ type: "authorize-capture" })} /> : null}
           <ToolbarButton icon={<Settings size={14} />} title="设置" onClick={() => setDialog("settings")} />
           <ToolbarButton icon={<Power size={14} />} label="结束" variant="danger" onClick={() => send({ type: "end-session" })} />
         </div>
@@ -487,6 +487,7 @@ export function App() {
       {dialog === "settings" ? (
         <SettingsDrawer
           project={project}
+          currentPage={page}
           preflight={preflight}
           health={health}
           healthBusy={healthBusy}
@@ -607,8 +608,9 @@ function RehearsalNoteDialog({ value, onChange, onFinish }: { value: string; onC
   );
 }
 
-function SettingsDrawer({ project, preflight, health, healthBusy, diagnostics, onAutoAdvanceSeconds, onPageAutoAdvanceSeconds, onRunHealthCheck, onDownloadDiagnostics, onClose }: {
+function SettingsDrawer({ project, currentPage, preflight, health, healthBusy, diagnostics, onAutoAdvanceSeconds, onPageAutoAdvanceSeconds, onRunHealthCheck, onDownloadDiagnostics, onClose }: {
   project: Parameters<typeof runProjectPreflight>[0];
+  currentPage: Parameters<typeof runProjectPreflight>[0]["pages"][number];
   preflight: ReturnType<typeof runProjectPreflight> | null;
   health: Array<{ pageId: string; ok: boolean; status: number | null; error: string | null; elapsedMs: number }>;
   healthBusy: boolean;
@@ -619,7 +621,6 @@ function SettingsDrawer({ project, preflight, health, healthBusy, diagnostics, o
   onDownloadDiagnostics: () => void;
   onClose: () => void;
 }) {
-  const currentPage = project.pages[0];
   return (
     <Dialog title="演示设置" onClose={onClose}>
       <label className="field">
@@ -627,8 +628,8 @@ function SettingsDrawer({ project, preflight, health, healthBusy, diagnostics, o
         <input type="number" min={1} max={14400} value={project.autoAdvanceSeconds} onChange={(event) => onAutoAdvanceSeconds(Math.max(1, Number(event.target.value) || 1))} />
       </label>
       <label className="field">
-        <span>本页自动翻页间隔（秒，留空继承全局）</span>
-        <input type="number" min={1} max={14400} value={currentPage?.autoAdvanceSeconds ?? ""} placeholder="继承全局" onChange={(event) => onPageAutoAdvanceSeconds(event.target.value ? Math.max(1, Number(event.target.value)) : undefined)} />
+        <span>本页（{currentPage.title}）自动翻页间隔（秒，留空继承全局）</span>
+        <input type="number" min={1} max={14400} value={currentPage.autoAdvanceSeconds ?? ""} placeholder="继承全局" onChange={(event) => onPageAutoAdvanceSeconds(event.target.value ? Math.max(1, Number(event.target.value)) : undefined)} />
       </label>
       {preflight ? (
         <section className="panel-settings__preflight" aria-label="发布前检查">
@@ -644,8 +645,8 @@ function SettingsDrawer({ project, preflight, health, healthBusy, diagnostics, o
       {health.length > 0 ? (
         <section className="panel-settings__health" aria-label="健康检查结果">
           {health.map((item) => {
-            const page = project.pages.find((candidate) => candidate.id === item.pageId);
-            return <p key={item.pageId} data-state={item.ok ? "ok" : "bad"}>{page?.title ?? item.pageId}：{item.ok ? `正常（${item.status}，${item.elapsedMs}ms）` : `${item.error ?? "异常"}${item.status ? `（${item.status}）` : ""}`}</p>;
+            const healthPage = project.pages.find((candidate) => candidate.id === item.pageId);
+            return <p key={item.pageId} data-state={item.ok ? "ok" : "bad"}>{healthPage?.title ?? item.pageId}：{item.ok ? `正常（${item.status}，${item.elapsedMs}ms）` : `${item.error ?? "异常"}${item.status ? `（${item.status}）` : ""}`}</p>;
           })}
         </section>
       ) : null}

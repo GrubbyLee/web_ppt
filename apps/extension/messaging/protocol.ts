@@ -55,6 +55,7 @@ export type UiMessage =
   | { type: "cancel-mask-pick" }
   | { type: "open-audience" }
   | { type: "authorize-capture" }
+  | { type: "stage-laser"; laser: PresentationSession["laser"] }
   | { type: "open-workbench" }
   | { type: "recorder-start"; recordingId: string }
   | { type: "recorder-stop"; recordingId: string }
@@ -67,6 +68,7 @@ export type UiMessage =
 
 export type BgMessage =
   | { type: "state"; state: BroadcastState }
+  | { type: "laser"; laser: PresentationSession["laser"] }
   | { type: "origin-authorization-required"; origin: string | null; reason?: string }
   | { type: "capture-start"; streamId: string; tabId: number }
   | { type: "capture-stop" }

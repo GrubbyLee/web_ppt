@@ -9,7 +9,7 @@ v0.2.0 完成了从 Tauri 桌面端到纯浏览器扩展的架构重写（见 [v
 - 日常开发：`npm run dev -w @showit/extension`，按 WXT 提示在 Chrome 加载 `.output/chrome-mv3`。
 - 生产安装：下载 release 的 `Showit_Extension_<version>.zip`，解压后在 `chrome://extensions` 打开开发者模式并“加载已解压的扩展程序”。
 - 首次运行某个项目时，Chrome 会请求业务系统站点访问权限（按 Origin 逐个授权）。
-- 观众画面捕获需要授权：在演示画面标签上点击工具栏 Showit 图标、右键选择“Showit：授权画面捕获”，或按 `Ctrl+Shift+9`。
+- 观众画面捕获需要授权：在演示画面标签上右键选择“Showit：授权画面捕获”，或按 `Ctrl+Shift+9`（工具栏图标用于打开控制台）。
 
 ## 开发命令
 

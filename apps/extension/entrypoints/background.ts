@@ -573,8 +573,15 @@ export default defineBackground(() => {
       result = { ok: false, reason: error instanceof Error ? error.message : "步骤执行失败。" };
     }
 
+    const restoreScreenMode = () => {
+      if (sensitiveFill && machine?.session.screenMode === "privacy" && previousScreenMode === "normal") {
+        applyMachineAction({ type: "set-screen-mode", screenMode: "normal" });
+      }
+    };
+
     if (!result?.ok) {
       runtime.stepExecution = { stepId, state: "failed", reason: String(result?.reason || "动作执行失败").slice(0, 200) };
+      restoreScreenMode();
       broadcastState();
       return;
     }
@@ -583,6 +590,7 @@ export default defineBackground(() => {
       const condition = await waitForCondition(runtime.sessionTabId, step.expectedCondition as unknown as Record<string, unknown>, step.conditionTimeoutSeconds);
       if (!condition.ok) {
         runtime.stepExecution = { stepId, state: "failed", reason: condition.reason };
+        restoreScreenMode();
         broadcastState();
         return;
       }
@@ -617,7 +625,7 @@ export default defineBackground(() => {
       }
       applyMachineAction({ type: "confirm-high-risk-step" });
     }
-    if (step.recordedAction && step.execution !== "hint") {
+    if (step.recordedAction && step.execution !== "hint" && !machine.session.completedStepIds.includes(stepId)) {
       void runStepExecution(stepId);
       return;
     }
@@ -626,6 +634,14 @@ export default defineBackground(() => {
 
   function interceptAction(action: SessionAction): void {
     if (!machine) return;
+    // A resolved (forced or manually confirmed) step must not keep the
+    // failure/manual dialog pinned open, and auto-advance must resume.
+    if (action.type === "force-complete-step" || action.type === "complete-step") {
+      if (runtime.stepExecution?.stepId === action.stepId) runtime.stepExecution = null;
+    }
+    if (action.type === "set-active-page") {
+      runtime.stepExecution = null;
+    }
     if (action.type === "next-step") {
       const page = currentPage();
       const completed = machine.session.completedStepIds;
@@ -634,6 +650,7 @@ export default defineBackground(() => {
         handleExecuteStep(next.id);
         return;
       }
+      if (!next) runtime.stepExecution = null;
     }
     if (action.type === "complete-step") {
       const page = currentPage();
@@ -686,6 +703,14 @@ export default defineBackground(() => {
       offscreenReady = true;
       return true;
     } catch (error) {
+      // The offscreen document outlives a service-worker restart; creating a
+      // second one fails. Reuse the existing document instead of erroring out
+      // (otherwise new audience windows can never join after an SW restart).
+      const message = error instanceof Error ? error.message : String(error);
+      if (/single offscreen document/i.test(message)) {
+        offscreenReady = true;
+        return true;
+      }
       recordDiagnostic("创建离屏文档", error);
       return false;
     }
@@ -717,7 +742,7 @@ export default defineBackground(() => {
       postToOffscreen({ type: "capture-start", streamId: String(streamId), tabId: runtime.sessionTabId });
     } catch (error) {
       recordDiagnostic("捕获演示标签", error);
-      runtime.message = "画面捕获需要授权：请在演示画面标签上点击浏览器工具栏的 Showit 图标、右键选择“Showit：授权画面捕获”，或按 Ctrl+Shift+9。";
+      runtime.message = "画面捕获需要授权：请在演示画面标签上右键选择“Showit：授权画面捕获”，或按 Ctrl+Shift+9（工具栏图标用于打开控制台）。";
       broadcastState();
     }
   }
@@ -1138,9 +1163,10 @@ export default defineBackground(() => {
     })).catch(() => undefined);
   });
 
-  browser.action.onClicked.addListener(() => {
-    void authorizeCapture();
-  });
+  // NOTE: the toolbar icon opens the side panel (setPanelBehavior above), so
+  // action.onClicked never fires. Capture authorization gestures are the
+  // context-menu entry and the Ctrl+Shift+9 command — both grant activeTab
+  // on the session tab.
 
   browser.contextMenus.onClicked.addListener((info) => {
     if (info.menuItemId === AUTHORIZE_CAPTURE_MENU_ID) void authorizeCapture();
@@ -1159,7 +1185,12 @@ export default defineBackground(() => {
         // the presenter restores them from the side panel.
         runtime.message = "演示会话已恢复，请从控制台重新连接画面标签。";
         broadcastState();
+        return;
       }
+      // storage.session is wiped when the browser exits, but DNR dynamic
+      // rules persist — a session that died with the browser must not leave
+      // write-blocking rules installed forever.
+      await clearProtectionRules();
     } catch {
       // No snapshot to restore.
     }

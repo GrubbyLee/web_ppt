@@ -25,4 +25,14 @@ Copyright Colin McDonnell
 https://zod.dev
 Licensed under the MIT License.
 
+fflate（项目包 ZIP 打包与解析）
+Copyright Arjun Barrett and contributors
+https://101arrowz.github.io/fflate
+Licensed under the MIT License.
+
+hash-wasm（项目指纹 Argon2id/SHA-256）
+Copyright Dan Boulet and contributors
+https://github.com/Daninet/hash-wasm
+Licensed under the MIT License.
+
 fflate、hash-wasm 及其他构建期依赖的完整清单见根目录 package-lock.json。

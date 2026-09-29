@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { PresentationSession } from "@showit/contracts";
 import { createRoot } from "react-dom/client";
 import { browser } from "wxt/browser";
 import type { BgMessage, BroadcastState, UiMessage } from "@/messaging/protocol";
@@ -13,6 +14,8 @@ function AudienceApp() {
   const [videoLive, setVideoLive] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
+  const laserRef = useRef<HTMLDivElement>(null);
+  const laserExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const port = browser.runtime.connect({ name: `${PORT_PREFIX}audience` });
@@ -25,6 +28,22 @@ function AudienceApp() {
     };
     port.onMessage.addListener((message: BgMessage) => {
       if (message.type === "state") setState(message.state);
+      if (message.type === "laser") {
+        if (laserExpiry.current) clearTimeout(laserExpiry.current);
+        const dot = laserRef.current;
+        if (dot) {
+          if (!message.laser) {
+            dot.style.opacity = "0";
+          } else {
+            dot.style.left = `${message.laser.x * 100}%`;
+            dot.style.top = `${message.laser.y * 100}%`;
+            dot.style.opacity = "1";
+            laserExpiry.current = setTimeout(() => {
+              dot.style.opacity = "0";
+            }, Math.max(0, message.laser!.expiresAt - Date.now()));
+          }
+        }
+      }
       if (message.type === "rtc-signal" && message.to === viewerId && message.from === "publisher") {
         const data = message.data as { type?: string; sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit };
         void (async () => {
@@ -73,6 +92,7 @@ function AudienceApp() {
   }, [viewerId]);
 
   const machine = state?.machine ?? null;
+  const circles: PresentationSession["circles"] = machine?.session.circles ?? [];
   const page = machine ? machine.project.pages[machine.session.currentPageIndex] ?? null : null;
   const offlineActive = Boolean(page && machine?.session.offlineFallbackPageId === page.id);
   const screenMode = machine?.session.screenMode ?? "privacy";
@@ -142,6 +162,24 @@ function AudienceApp() {
           ) : screenMode === "privacy" ? (
             <span>{brand?.privacyMessage ?? "画面已保护"}</span>
           ) : null}
+        </div>
+      ) : null}
+
+      {machine && !showVideo ? (
+        <div className="audience-annotations" aria-hidden="true">
+          {machine.session.circles.map((circle) => (
+            <div
+              key={circle.id}
+              className="audience-annotation-circle"
+              style={{
+                left: `${Math.min(circle.x1, circle.x2) * 100}%`,
+                top: `${Math.min(circle.y1, circle.y2) * 100}%`,
+                width: `${Math.abs(circle.x2 - circle.x1) * 100}%`,
+                height: `${Math.abs(circle.y2 - circle.y1) * 100}%`
+              }}
+            />
+          ))}
+          <div ref={laserRef} className="audience-annotation-laser" />
         </div>
       ) : null}
 
