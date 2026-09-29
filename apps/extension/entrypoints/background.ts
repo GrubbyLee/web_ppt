@@ -58,6 +58,8 @@ let recorder: RecorderState | null = null;
 let viewers = new Map<string, ViewerEntry>();
 const audienceWindows = new Map<string, number>();
 let captureActive = false;
+/** Demo-console mutations replicated to the audience mirror (cross-document). */
+let demoMutations: BroadcastMeta["demoMutations"] = [];
 let offscreenReady = false;
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 let boundMaskResolveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -207,7 +209,8 @@ function broadcastMeta(): BroadcastMeta {
     captureActive,
     viewerCount: [...viewers.values()].filter((viewer) => viewer.status === "connected").length,
     offlineOriginRequest: runtime.offlineOriginRequest,
-    message: runtime.message
+    message: runtime.message,
+    demoMutations
   };
 }
 
@@ -863,7 +866,11 @@ export default defineBackground(() => {
   async function startRecorder(recordingId: string): Promise<void> {
     // While a session is live the session tab is the recording target; the
     // workbench (usually in another window) is never the active business tab.
-    const sessionTab = runtime.sessionTabId !== null ? await browser.tabs.get(runtime.sessionTabId).catch(() => null) : null;
+    // Stage pages are slides, not a business system — fall back to the active
+    // tab so recording still works from any authorized business page.
+    const sessionTab = runtime.sessionTabId !== null && runtime.tabKind !== "stage"
+      ? await browser.tabs.get(runtime.sessionTabId).catch(() => null)
+      : null;
     const [tab] = sessionTab ? [sessionTab] : await browser.tabs.query({ active: true, lastFocusedWindow: true });
     const isDemoTab = Boolean(tab?.url?.startsWith(browser.runtime.getURL("/demo.html")));
     if (!tab?.id || (!safePageUrl(tab.url ?? "") && !isDemoTab)) {
@@ -981,6 +988,7 @@ export default defineBackground(() => {
     runtime.stepExecution = null;
     runtime.offlineOriginRequest = null;
     runtime.message = null;
+    demoMutations = [];
     if (windowId !== null) await browser.windows.remove(windowId).catch(() => undefined);
     try {
       await mergePresenterEditsIntoWorkspace(runtimeProject, presenterEdits);
@@ -1094,6 +1102,11 @@ export default defineBackground(() => {
       case "authorize-capture":
         await authorizeCapture();
         return;
+      case "demo-mutation": {
+        demoMutations = [...demoMutations.slice(-99), message.mutation];
+        broadcastState();
+        return;
+      }
       case "demo-connector-state": {
         // The built-in demo page reports its login gate over its port.
         if (runtime.tabKind === "demo") {

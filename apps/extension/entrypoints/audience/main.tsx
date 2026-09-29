@@ -154,7 +154,7 @@ function AudienceApp() {
 
       {mode === "demo" && demoView ? (
         <div className="audience-demo">
-          <DemoConsole mode="mirror" view={demoView} />
+          <DemoConsole mode="mirror" view={demoView} state={state} />
         </div>
       ) : null}
 

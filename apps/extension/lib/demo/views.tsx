@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import {
   approvals,
+  applyDemoMutation,
   demoActivity,
-  demoMutations,
-  demoQuotaSave,
+  type DemoMutation,
   demoCapabilities,
   demoProtocolShare,
   demoTraces,
@@ -414,15 +414,16 @@ export function StudioDetailsView() {
   );
 }
 
-export function RegistryView({ onRefresh }: { onRefresh?: (() => void) | undefined }) {
+export function RegistryView({ onRefresh, onMutate }: { onRefresh?: (() => void) | undefined; onMutate?: ((mutation: DemoMutation) => void) | undefined }) {
   const [filter, setFilter] = useState<"all" | "运行中" | "待发布" | "已下线">("all");
   const [selected, setSelected] = useState<string | null>("asset-ops-copilot");
   const [quotaDraft, setQuotaDraft] = useState<string | null>(null);
   const assets = registryAssets().filter((asset) => filter === "all" || asset.lifecycle === filter);
   const detail = registryAssets().find((item) => item.id === selected) ?? null;
 
-  const mutate = (fn: () => void) => {
-    fn();
+  const mutate = (mutation: DemoMutation) => {
+    applyDemoMutation(mutation);
+    onMutate?.(mutation);
     if (detail) setQuotaDraft(String(detail.quota));
     onRefresh?.();
   };
@@ -471,18 +472,12 @@ export function RegistryView({ onRefresh }: { onRefresh?: (() => void) | undefin
             </label>
             <button type="button" data-testid="save-quota" onClick={() => {
               const value = Math.round(Math.min(6000, Math.max(10, Number(quotaDraft) || detail.quota)));
-              mutate(() => demoQuotaSave(detail.id, value));
+              mutate({ kind: "quota", assetId: detail.id, value });
             }}>保存配额</button>
           </div>
           <div className="demo-detail__lifecycle">
-            <button type="button" data-testid="publish-api" disabled={detail.lifecycle === "运行中"} onClick={() => mutate(() => {
-              demoMutations.published.add(detail.id);
-              demoMutations.offlined.delete(detail.id);
-            })}>发布能力</button>
-            <button type="button" data-testid="offline-api" disabled={detail.lifecycle !== "运行中"} onClick={() => mutate(() => {
-              demoMutations.offlined.add(detail.id);
-              demoMutations.published.delete(detail.id);
-            })}>下线能力</button>
+            <button type="button" data-testid="publish-api" disabled={detail.lifecycle === "运行中"} onClick={() => mutate({ kind: "publish", assetId: detail.id })}>发布能力</button>
+            <button type="button" data-testid="offline-api" disabled={detail.lifecycle !== "运行中"} onClick={() => mutate({ kind: "offline", assetId: detail.id })}>下线能力</button>
             <span data-testid={detail.lifecycle === "运行中" ? "api-status-running" : "api-status-idle"}><StatusChip value={detail.lifecycle} /></span>
           </div>
           <p className="demo-note">发布已上架资产属于高风险变更：Showit 会在控制台要求显式确认，并在审计中记录。</p>
@@ -492,7 +487,7 @@ export function RegistryView({ onRefresh }: { onRefresh?: (() => void) | undefin
   );
 }
 
-export function ApprovalsView({ onRefresh }: { onRefresh?: (() => void) | undefined }) {
+export function ApprovalsView({ onRefresh, onMutate }: { onRefresh?: (() => void) | undefined; onMutate?: ((mutation: DemoMutation) => void) | undefined }) {
   const [selected, setSelected] = useState<string | null>("approval-customer-master");
   const list = approvals();
   const detail = list.find((item) => item.id === selected) ?? null;
@@ -512,7 +507,8 @@ export function ApprovalsView({ onRefresh }: { onRefresh?: (() => void) | undefi
               <td>
                 {item.status === "待审批" ? (
                   <button type="button" data-testid="approve-order" onClick={() => {
-                    demoMutations.approved.add(item.id);
+                    applyDemoMutation({ kind: "approve", approvalId: item.id });
+                    onMutate?.({ kind: "approve", approvalId: item.id });
                     onRefresh?.();
                   }}>通过</button>
                 ) : null}

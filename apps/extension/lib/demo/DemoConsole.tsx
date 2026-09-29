@@ -15,17 +15,20 @@ import {
   demoNav,
   type DemoView
 } from "./views";
-import { readDemoSession, writeDemoSession, type DemoSession } from "./data";
+import { applyDemoMutation, readDemoSession, writeDemoSession, type DemoMutation, type DemoSession } from "./data";
+import type { BroadcastState } from "@/messaging/protocol";
 
 type DemoConsoleProps = {
   /** Interactive mode: full app with hash routing and the login gate. */
   mode: "interactive";
   onSessionChange?: (session: DemoSession | null) => void;
-  onMutation?: () => void;
+  onMutation?: (mutation: DemoMutation) => void;
 } | {
-  /** Mirror mode: read-only rendering of one view (audience window). */
+  /** Mirror mode: read-only rendering of one view (audience window).
+   *  `state` supplies replicated demo mutations from the session broadcast. */
   mode: "mirror";
   view: DemoView;
+  state?: BroadcastState | null;
 };
 
 const viewTitles: Record<DemoView, string> = {
@@ -55,6 +58,13 @@ export function DemoConsole(props: DemoConsoleProps) {
   const [intended, setIntended] = useState<DemoView>("overview");
   const [, forceRender] = useState(0);
 
+  // Mirror mode: apply replicated mutations from every state broadcast so
+  // published/approved changes made in the session tab render here too.
+  useEffect(() => {
+    if (props.mode !== "mirror" || !props.state) return;
+    for (const mutation of props.state.meta.demoMutations) applyDemoMutation(mutation as DemoMutation);
+  }, [props]);
+
   useEffect(() => {
     if (props.mode !== "interactive") return;
     const onHashChange = () => setHashView(parseHash());
@@ -81,9 +91,9 @@ export function DemoConsole(props: DemoConsoleProps) {
     navigate("login" as DemoView);
   }, [navigate, props]);
 
-  const bumpMutations = useCallback(() => {
+  const bumpMutations = useCallback((mutation: DemoMutation | undefined) => {
     forceRender((value) => value + 1);
-    props.mode === "interactive" && props.onMutation?.();
+    if (props.mode === "interactive" && mutation) props.onMutation?.(mutation);
   }, [props]);
 
   const activeView: DemoView = props.mode === "mirror"
@@ -118,9 +128,9 @@ export function DemoConsole(props: DemoConsoleProps) {
       case "studio-details":
         return <StudioDetailsView />;
       case "registry":
-        return <RegistryView onRefresh={props.mode === "interactive" ? bumpMutations : undefined} />;
+        return <RegistryView onRefresh={props.mode === "interactive" ? () => bumpMutations(undefined) : undefined} onMutate={props.mode === "interactive" ? (mutation) => bumpMutations(mutation) : undefined} />;
       case "approvals":
-        return <ApprovalsView onRefresh={props.mode === "interactive" ? bumpMutations : undefined} />;
+        return <ApprovalsView onRefresh={props.mode === "interactive" ? () => bumpMutations(undefined) : undefined} onMutate={props.mode === "interactive" ? (mutation) => bumpMutations(mutation) : undefined} />;
       case "operations":
         return <OperationsView />;
       case "admin":
@@ -153,11 +163,10 @@ export function DemoConsole(props: DemoConsoleProps) {
               {group.items.map((item) => (
                 <a
                   key={item.view}
-                  href={props.mode === "interactive" ? `#/${item.view}` : undefined}
+                  {...(props.mode === "interactive" ? { href: `#/${item.view}` } : { "aria-hidden": true, tabIndex: -1 })}
                   data-testid={`nav-${item.view}`}
                   data-active={activeView === item.view || undefined}
                   aria-current={activeView === item.view ? "page" : undefined}
-                  onClick={props.mode === "interactive" ? undefined : (event) => event.preventDefault()}
                 >
                   {item.label}
                 </a>

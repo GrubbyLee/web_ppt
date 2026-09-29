@@ -17,6 +17,8 @@ export type StepExecutionStatus = {
   reason?: string | undefined;
 };
 
+export type DemoMutationState = Array<{ kind: "publish" | "offline" | "approve" | "quota"; assetId?: string; approvalId?: string; value?: number }>;
+
 export type BroadcastMeta = {
   running: boolean;
   live: boolean;
@@ -33,6 +35,7 @@ export type BroadcastMeta = {
   viewerCount: number;
   offlineOriginRequest: string | null;
   message: string | null;
+  demoMutations: DemoMutationState;
 };
 
 export type BroadcastState = {
@@ -57,6 +60,7 @@ export type UiMessage =
   | { type: "authorize-capture" }
   | { type: "stage-laser"; laser: PresentationSession["laser"] }
   | { type: "demo-connector-state"; state: "ready" | "anonymous" }
+  | { type: "demo-mutation"; mutation: { kind: "publish" | "offline" | "approve" | "quota"; assetId?: string; approvalId?: string; value?: number } }
   | { type: "open-workbench" }
   | { type: "recorder-start"; recordingId: string }
   | { type: "recorder-stop"; recordingId: string }

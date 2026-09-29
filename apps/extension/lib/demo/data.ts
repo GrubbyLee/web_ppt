@@ -154,13 +154,37 @@ export function writeDemoSession(session: DemoSession | null): void {
   }
 }
 
-/** In-memory mutations — persist for the tab lifetime only. */
+/** In-memory mutations — persist for the tab lifetime only.
+ *
+ * Contexts: the interactive demo page OWNS these (user gestures); the
+ * audience mirror APPLIES a replicated copy so published/approved state
+ * stays in sync across documents (each page is its own JS context). */
 export const demoMutations = {
   published: new Set<string>(),
   offlined: new Set<string>(),
   approved: new Set<string>(),
   quotas: new Map<string, number>()
 };
+
+export type DemoMutation =
+  | { kind: "publish"; assetId: string }
+  | { kind: "offline"; assetId: string }
+  | { kind: "approve"; approvalId: string }
+  | { kind: "quota"; assetId: string; value: number };
+
+export function applyDemoMutation(mutation: DemoMutation): void {
+  if (mutation.kind === "publish") {
+    demoMutations.published.add(mutation.assetId);
+    demoMutations.offlined.delete(mutation.assetId);
+  } else if (mutation.kind === "offline") {
+    demoMutations.offlined.add(mutation.assetId);
+    demoMutations.published.delete(mutation.assetId);
+  } else if (mutation.kind === "approve") {
+    demoMutations.approved.add(mutation.approvalId);
+  } else {
+    demoMutations.quotas.set(mutation.assetId, Math.round(Math.min(6_000, Math.max(10, mutation.value))));
+  }
+}
 
 export function assetLifecycle(asset: RegistryAsset): RegistryAsset["lifecycle"] {
   if (demoMutations.offlined.has(asset.id)) return "已下线";

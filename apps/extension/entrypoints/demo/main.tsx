@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { browser } from "wxt/browser";
 import type { Browser } from "wxt/browser";
 import { DemoConsole } from "@/lib/demo/DemoConsole";
-import { readDemoSession, writeDemoSession, type DemoSession } from "@/lib/demo/data";
+import { applyDemoMutation, readDemoSession, writeDemoSession, type DemoMutation, type DemoSession } from "@/lib/demo/data";
 import {
   checkCondition,
   createOverlayRenderer,
@@ -70,7 +70,10 @@ function DemoApp() {
     reportConnectorState(Boolean(session));
   }, []);
 
-  const handleMutation = useCallback(() => {
+  const handleMutation = useCallback((mutation?: DemoMutation) => {
+    // Replicate to the background so the audience mirror (a separate
+    // document with its own module state) sees publish/approve changes.
+    if (mutation) post({ type: "demo-mutation", mutation } as UiMessage);
     setOverlayTick((value) => value + 1);
   }, []);
 
@@ -81,6 +84,7 @@ function DemoApp() {
       if (message.type === "state") {
         const machine = message.state.machine;
         annotationTool = machine.session.annotationTool;
+        for (const mutation of message.state.meta.demoMutations) applyDemoMutation(mutation as DemoMutation);
         const page = machine.project.pages[machine.session.currentPageIndex];
         overlayRenderer.render({
           screenMode: machine.session.screenMode,
@@ -99,7 +103,13 @@ function DemoApp() {
       // Reload reconnects.
     }
     reportConnectorState(Boolean(sessionRef.current));
+    // Navigating to the login view (logout, or a fresh session landing on it)
+    // re-opens the login gate after the background already probed the tab —
+    // re-report so the console switches back to 未登录.
+    const onHashChange = () => reportConnectorState(Boolean(sessionRef.current));
+    window.addEventListener("hashchange", onHashChange);
     return () => {
+      window.removeEventListener("hashchange", onHashChange);
       if (activePort === port) activePort = null;
       try {
         port.disconnect();
@@ -197,7 +207,11 @@ function DemoApp() {
         return false;
       }
       if (message?.type === "showit-check-condition") {
-        sendResponse({ ok: checkCondition(message.condition as { type?: string }), url: `${location.origin}/demo.html`, title: document.title });
+        const condition = message.condition as { type?: string } | null | undefined;
+        // On the login view a text condition checks the whole document; the
+        // login form fields must not make "element" conditions match before
+        // the page actually navigated past login (probe keeps parity).
+        sendResponse({ ok: checkCondition(condition), url: `${location.origin}/demo.html`, title: document.title });
         return false;
       }
       if (message?.type === "showit-pick-privacy-mask") {

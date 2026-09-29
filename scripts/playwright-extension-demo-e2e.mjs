@@ -160,6 +160,8 @@ try {
   if (audiencePage) {
     await audiencePage.waitForSelector(".audience-demo .demo-app", { timeout: 8_000 });
     assert(await audiencePage.locator(".audience-demo [data-testid=approvals-table]").isVisible(), "观众镜像本地渲染当前演示视图（无需捕获授权）");
+    const mirroredApproval = await audiencePage.locator(".audience-demo [data-testid=approval-status-approved], .audience-demo [data-testid=approval-status]").first().textContent().catch(() => null);
+    assert((mirroredApproval ?? "").includes("已通过"), `观众镜像复制了会话标签中的审批状态（${mirroredApproval?.trim()}）`);
     assert(await audiencePage.locator(".audience-annotation-circle").count() === 1, "观众镜像同步显示圈选标注");
     const badge = await audiencePage.textContent(".audience-badge").catch(() => null);
     assert(Boolean(badge?.includes("13 / 18")), `观众角标与当前页同步：${badge?.replace(/\s+/g, " ")}`);
