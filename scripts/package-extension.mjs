@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = resolve(root, "apps/extension/.output/chrome-mv3");
-const version = process.env.npm_package_version ?? "0.2.0";
+const version = process.env.npm_package_version ?? JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version ?? "0.0.0";
 const output = resolve(root, `apps/extension/release/Showit_Extension_${version}.zip`);
 const files = {};
 
