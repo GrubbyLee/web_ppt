@@ -139,6 +139,44 @@ route("GET", "/watch/([a-z2-9]+)/bootstrap", (_request, response, match) => {
   sendJson(response, 200, { joinMode: room.joinMode, capacity: room.capacity, viewerCount: room.viewers.size });
 });
 
+// Relay-hosted built-in demo console: an http(s) page is capturable, unlike
+// the extension copy (chrome-extension://) — that is what lets remote viewers
+// watch the built-in sample.
+route("GET", "/demo(?:/|/index\\.html)?", (_request, response) => {
+  const file = resolve(__dirname, "../public/demo/index.html");
+  if (!existsSync(file)) {
+    sendJson(response, 404, { error: "演示控制台资源缺失，请先执行 npm run build:demo-site 。" });
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(readFileSync(file, "utf8"));
+});
+
+route("GET", "/demo/assets/(.+)", (_request, response, match) => {
+  const requested = (match[1] ?? "").replace(/^.*\//, ""); // no traversal
+  const file = resolve(__dirname, "../public/demo/assets", requested);
+  if (!existsSync(file)) {
+    sendJson(response, 404, { error: "未找到演示控制台资源。" });
+    return;
+  }
+  const types: Record<string, string> = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".map": "application/json",
+  };
+  response.writeHead(200, {
+    "content-type": types[extname(file)] ?? "application/octet-stream",
+    "cache-control": "no-cache",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(readFileSync(file));
+});
+
 route("GET", "/health", (_request, response) => {
   sendJson(response, 200, { ok: true, rooms: 0 });
 });

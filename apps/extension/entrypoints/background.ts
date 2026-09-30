@@ -173,6 +173,14 @@ function targetUrlForPage(page: PresentationPage | null): string {
   // touch the network.
   if (page.url.startsWith("demo://")) {
     const view = page.url.slice("demo://".length);
+    // With a remote (relay) room open, route the built-in demo to the
+    // relay-hosted copy of the console: an http(s) page IS capturable, so
+    // remote viewers can watch the built-in sample (chrome-extension://
+    // pages cannot be captured). Without a relay the local extension page
+    // is used — it is only ever seen by the presenter.
+    if (remoteRoom && relayBase) {
+      return `${relayBaseForRoom()}/demo/#/${view}`;
+    }
     return `${browser.runtime.getURL("/demo.html")}#/${view}`;
   }
   const resolved = resolveUrlTemplate(page.url, machine.project, page);

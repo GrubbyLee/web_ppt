@@ -1,0 +1,11 @@
+{
+  "name": "@showit/demo-site",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

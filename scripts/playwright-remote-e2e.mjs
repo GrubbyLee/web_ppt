@@ -117,6 +117,26 @@ try {
     assert(true, "观众页码角标已渲染（快照通道工作）");
   });
 
+  console.log("4b) 内置演示页走中继托管副本（可捕获 → 远程可见）");
+  // Navigate to the sample's first demo:// page (6/18). With the room open the
+  // session tab must serve the relay-hosted console, since extension pages
+  // cannot be captured.
+  // Close the relay dialog so the footer nav is clickable again.
+  await sidepanel.locator(".dialog .dialog__actions").last().getByText("关闭").click().catch(async () => {
+    await sidepanel.keyboard.press("Escape");
+  });
+  await sidepanel.waitForTimeout(400);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const at = await sidepanel.locator(".panel-page__index").textContent().catch(() => null);
+    if ((at ?? "").trim() === "6/18") break;
+    await sidepanel.locator(".panel-footer__nav").getByTitle("下一页").click();
+    await sidepanel.waitForTimeout(500);
+  }
+  await sidepanel.waitForTimeout(1_200);
+  const demoTab = presenter.pages().find((page) => page.url().includes("/demo"));
+  const demoUrl = demoTab ? demoTab.url() : "";
+  assert(demoUrl.includes(`/demo/#/`), `演示页路由到中继托管的演练控制台（${demoUrl.slice(0, 72)}）`);
+
   console.log("5) 结束演示清理远程房间");
   await sidepanel.locator(".dialog .dialog__actions").last().getByText("关闭").click().catch(async () => {
     await sidepanel.keyboard.press("Escape");

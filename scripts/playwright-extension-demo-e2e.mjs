@@ -153,7 +153,7 @@ try {
   await sidepanel.waitForTimeout(800);
   assert(await demoPage.locator("[data-showit-overlay] .showit-circle").count() === 1, "圈选标注已渲染在演示页");
 
-  await sidepanel.locator(".panel-footer__modes").getByText("观众屏").click();
+  await sidepanel.locator(".panel-footer__modes").getByText("共享画面").click();
   await sidepanel.waitForTimeout(1_500);
   const audiencePage = context.pages().find((page) => page.url().includes("/audience.html"));
   assert(Boolean(audiencePage), "观众窗口已打开");

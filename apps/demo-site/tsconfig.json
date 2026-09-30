@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "types": [],
+    "paths": {
+      "@showit/demo/*": ["../../apps/extension/lib/demo/*"],
+      "@showit/contracts": ["../../packages/contracts/src/index.ts"],
+      "@showit/messaging": ["../../apps/extension/messaging/protocol.ts"],
+      "@/*": ["../../apps/extension/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../apps/extension/lib/demo/**/*.ts", "../../apps/extension/messaging/protocol.ts",
+    "../../packages/contracts/src/index.ts"
+  ]
+}

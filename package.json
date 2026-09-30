@@ -20,7 +20,8 @@
     "release:extension": "npm run build -w @showit/extension && npm run bundle:check && node scripts/package-extension.mjs",
     "test:extension-demo-e2e": "node scripts/playwright-extension-demo-e2e.mjs",
     "test:remote-e2e": "node scripts/playwright-remote-e2e.mjs",
-    "relay:dev": "npm run dev -w @showit/relay"
+    "relay:dev": "npm run dev -w @showit/relay",
+    "build:demo-site": "npm run build -w @showit/demo-site"
   },
   "engines": {
     "node": ">=22 <23",

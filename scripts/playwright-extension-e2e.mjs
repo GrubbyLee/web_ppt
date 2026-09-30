@@ -170,8 +170,8 @@ try {
   assert(true, "敏感输入消失后自动恢复就绪（观众封面解除）");
 
   console.log("6) 观众窗口与画面授权");
-  await sidepanel.getByTitle("观众屏").or(sidepanel.locator("button", { hasText: "观众屏" })).first().click({ timeout: 3_000 }).catch(async () => {
-    await sidepanel.locator(".panel-footer__modes").getByText("观众屏").click();
+  await sidepanel.getByTitle("共享画面").or(sidepanel.locator("button", { hasText: "共享画面" })).first().click({ timeout: 3_000 }).catch(async () => {
+    await sidepanel.locator(".panel-footer__modes").getByText("共享画面").click();
   });
   await sidepanel.waitForTimeout(2_000);
   const audiencePage = context.pages().find((page) => page.url().includes("/audience.html"));

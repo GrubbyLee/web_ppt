@@ -135,3 +135,20 @@ describe("relay integration", () => {
     expect(watch.status).toBe(404);
   });
 });
+
+describe("relay-hosted demo console", () => {
+  it("serves the demo console entry and assets when built", async () => {
+    const entry = await fetch(`${base}/demo/`);
+    expect(entry.status).toBe(200);
+    const html = await entry.text();
+    expect(html.includes("云枢")).toBe(true);
+    const asset = await fetch(`${base}/demo/assets/index.js`);
+    expect(asset.status).toBe(200);
+    expect((asset.headers.get("content-type") ?? "").includes("javascript")).toBe(true);
+  });
+
+  it("rejects traversal in the demo asset path", async () => {
+    const response = await fetch(`${base}/demo/assets/..%2F..%2Fpackage.json`);
+    expect([404, 400]).toContain(response.status);
+  });
+});

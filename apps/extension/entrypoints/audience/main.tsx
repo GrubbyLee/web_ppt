@@ -102,7 +102,7 @@ function AudienceApp() {
   const needsVideo = Boolean(machine && page && page.url && !page.url.startsWith("demo://") && (page.pageType === "business" || page.pageType === "external") && !offlineActive && screenMode === "normal");
 
   useEffect(() => {
-    document.title = brand?.audienceTitle ?? "Showit 观众屏";
+    document.title = brand?.audienceTitle ?? "Showit 共享画面";
   }, [brand?.audienceTitle]);
 
   useEffect(() => {
@@ -131,7 +131,7 @@ function AudienceApp() {
 
       {mode === "waiting" ? (
         <div className="audience-state">
-          <h1>{brand?.audienceTitle ?? "Showit 观众屏"}</h1>
+          <h1>{brand?.audienceTitle ?? "Showit 共享画面"}</h1>
           <p>正在等待演示画面…</p>
         </div>
       ) : null}

@@ -424,7 +424,7 @@ export function App() {
           <ToolbarButton icon={<Sun size={14} />} title="白屏（W）" active={session.screenMode === "white"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "white" ? "normal" : "white" })} />
           <ToolbarButton icon="❄" title="冻结画面（F）" active={session.screenMode === "frozen"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "frozen" ? "normal" : "frozen" })} />
           <ToolbarButton icon={<TriangleAlert size={14} />} title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
-          <ToolbarButton icon={<MonitorPlay size={14} />} label="观众屏" onClick={() => send({ type: "open-audience" })} />
+          <ToolbarButton icon={<MonitorPlay size={14} />} label="共享画面" title="打开只读共享画面窗口：用于视频会议共享，或接第二显示器预览（观众不看本机）" onClick={() => send({ type: "open-audience" })} />
           <ToolbarButton
             icon="🌐"
             label={meta.remote ? `远程 ${meta.remote.viewerCount}` : "远程观众"}
@@ -517,10 +517,16 @@ export function App() {
           remote={meta.remote}
           copied={relayCopied}
           onCopied={() => setRelayCopied(true)}
-          onOpen={() => {
+          onOpen={async () => {
             if (!relayBase.trim()) return;
-            void browser.storage.local.set({ "showit:relay-base:v1": relayBase.trim() });
-            send({ type: "open-remote-audience", relayBase: relayBase.trim() });
+            const base = relayBase.trim();
+            try {
+              await browser.permissions.request({ origins: [`${new URL(base).origin}/*`] });
+            } catch {
+              /* Non-loopback origins need the grant; localhost is already in host_permissions. */
+            }
+            void browser.storage.local.set({ "showit:relay-base:v1": base });
+            send({ type: "open-remote-audience", relayBase: base });
             setDialog(null);
           }}
           onEnd={() => {
