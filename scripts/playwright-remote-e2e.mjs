@@ -136,6 +136,9 @@ try {
   const demoTab = presenter.pages().find((page) => page.url().includes("/demo"));
   const demoUrl = demoTab ? demoTab.url() : "";
   assert(demoUrl.includes(`/demo/#/`), `演示页路由到中继托管的演练控制台（${demoUrl.slice(0, 72)}）`);
+  // 必须真的渲染出来：资源路径前缀错误会导致白屏，这条断言防止该回归.
+  await demoTab.waitForSelector(".demo-app", { timeout: 10_000 });
+  assert(true, "中继托管的演练控制台已渲染（资源可加载，非白屏）");
 
   console.log("5) 结束演示清理远程房间");
   await sidepanel.locator(".dialog .dialog__actions").last().getByText("关闭").click().catch(async () => {

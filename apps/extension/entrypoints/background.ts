@@ -67,6 +67,7 @@ let relaySignalSocket: WebSocket | null = null;
 /** Registered by the background runtime so module-scope relay code can
  *  trigger a capture start for real business tabs. */
 let startCaptureHook: (() => Promise<void>) | null = null;
+let stopCaptureHook: (() => Promise<void>) | null = null;
 let offscreenReady = false;
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 let boundMaskResolveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -413,6 +414,13 @@ async function endRemoteAudience(): Promise<void> {
       headers: { "x-presenter-token": relayPresenterToken }
     }).catch(() => undefined);
   }
+  // 若会话标签因远程房间停在中继托管的演练控制台上，切回扩展页：此后只有演示者本机在看。
+  const relayDemoPrefix = `${relayBaseForRoom()}/demo/`;
+  const tab = runtime.sessionTabId !== null
+    ? await browser.tabs.get(runtime.sessionTabId).catch(() => null)
+    : null;
+  if (tab?.url?.startsWith(relayDemoPrefix)) void syncSessionTab(true);
+  if (viewers.size === 0 && stopCaptureHook) await stopCaptureHook();
   broadcastState();
 }
 
@@ -683,7 +691,7 @@ export default defineBackground(() => {
           // The demo page natively implements the connector protocol and
           // reports its login state on the showit:demo port.
           runtime.connectorState = null;
-          if (viewers.size > 0) void startCapture();
+          if (viewers.size > 0 || remoteRoom) void startCapture();
         } else {
           runtime.connectorState = null;
         }
@@ -994,6 +1002,10 @@ export default defineBackground(() => {
 
   startCaptureHook = async () => {
     if (runtime.tabKind === "business") await startCapture();
+  };
+
+  stopCaptureHook = async () => {
+    await stopCapture();
   };
 
   async function startCapture(): Promise<void> {

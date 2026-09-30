@@ -7,6 +7,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: here,
+  // Served by the relay under /demo/ — asset URLs must carry that prefix.
+  base: "/demo/",
   plugins: [react()],
   resolve: {
     alias: {

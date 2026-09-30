@@ -13,3 +13,4 @@ test-results/
 apps/extension/.output/
 apps/extension/.wxt/
 apps/extension/release/
+apps/relay/public/demo/
