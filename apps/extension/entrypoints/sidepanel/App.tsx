@@ -425,6 +425,7 @@ export function App() {
           <ToolbarButton icon="❄" title="冻结画面（F）" active={session.screenMode === "frozen"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "frozen" ? "normal" : "frozen" })} />
           <ToolbarButton icon={<TriangleAlert size={14} />} title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
           <ToolbarButton icon={<MonitorPlay size={14} />} label="共享画面" title="打开只读共享画面窗口：用于视频会议共享，或接第二显示器预览（观众不看本机）" onClick={() => send({ type: "open-audience" })} />
+          <ToolbarButton icon="⛶" title="全屏控制台：在标签页中打开，占满整个屏幕" onClick={() => send({ type: "open-console-tab" })} />
           <ToolbarButton
             icon="🌐"
             label={meta.remote ? `远程 ${meta.remote.viewerCount}` : "远程观众"}

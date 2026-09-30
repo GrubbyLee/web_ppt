@@ -67,6 +67,7 @@ export type UiMessage =
   | { type: "pick-mask" }
   | { type: "cancel-mask-pick" }
   | { type: "open-audience" }
+  | { type: "open-console-tab" }
   | { type: "open-remote-audience"; relayBase: string }
   | { type: "end-remote-audience" }
   | { type: "relay-signal"; to: string; from: string; data: unknown }

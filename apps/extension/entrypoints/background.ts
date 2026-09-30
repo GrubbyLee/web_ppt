@@ -1338,6 +1338,10 @@ export default defineBackground(() => {
       case "open-audience":
         openAudienceWindow();
         return;
+      case "open-console-tab":
+        // 侧边栏宽度有限（且受浏览器侧边栏约束）：提供标签页形态的“全屏控制台”.
+        await browser.tabs.create({ url: browser.runtime.getURL("/sidepanel.html") }).catch((error) => recordDiagnostic("打开全屏控制台", error));
+        return;
       case "open-remote-audience":
         await openRemoteAudience(message.relayBase);
         return;
