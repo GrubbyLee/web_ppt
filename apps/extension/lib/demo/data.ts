@@ -172,6 +172,13 @@ export type DemoMutation =
   | { kind: "approve"; approvalId: string }
   | { kind: "quota"; assetId: string; value: number };
 
+/** Mutations applied in this document, in order.
+ *
+ * Kept so the interactive console can replay them after its port drops: a
+ * service worker restart used to strand the audience mirror on stale data,
+ * because the page still looks right locally (it mutates in memory). */
+export const appliedMutations: DemoMutation[] = [];
+
 export function applyDemoMutation(mutation: DemoMutation): void {
   if (mutation.kind === "publish") {
     demoMutations.published.add(mutation.assetId);
@@ -184,6 +191,8 @@ export function applyDemoMutation(mutation: DemoMutation): void {
   } else {
     demoMutations.quotas.set(mutation.assetId, Math.round(Math.min(6_000, Math.max(10, mutation.value))));
   }
+  appliedMutations.push(mutation);
+  if (appliedMutations.length > 100) appliedMutations.shift();
 }
 
 export function assetLifecycle(asset: RegistryAsset): RegistryAsset["lifecycle"] {

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { browser } from "wxt/browser";
 import type { Browser } from "wxt/browser";
 import { DemoConsole } from "@/lib/demo/DemoConsole";
-import { applyDemoMutation, readDemoSession, writeDemoSession, type DemoMutation, type DemoSession } from "@/lib/demo/data";
+import { appliedMutations, applyDemoMutation, readDemoSession, writeDemoSession, type DemoMutation, type DemoSession } from "@/lib/demo/data";
 import {
   checkCondition,
   createOverlayRenderer,
@@ -62,6 +62,8 @@ function reportConnectorState(loggedIn: boolean): void {
 
 function DemoApp() {
   const [, setOverlayTick] = useState(0);
+  // 端口重试计数：后台 SW 被回收时用它重新建立连接。
+  const [portAttempt, setPortAttempt] = useState(0);
   const sessionRef = useRef<DemoSession | null>(readDemoSession());
 
   const handleSessionChange = useCallback((session: DemoSession | null) => {
@@ -99,11 +101,18 @@ function DemoApp() {
     });
     port.onDisconnect.addListener(() => {
       if (activePort === port) activePort = null;
+      // 后台 service worker 会在演示中被回收：不重连的话，登录状态与之后每一个
+      // 发布/审批都再也传不到后台，观众镜像会一直停在旧状态。
+      setTimeout(() => setPortAttempt((value) => value + 1), 500);
     });
     try {
       port.postMessage({ type: "hello", ctx: "demo" } satisfies UiMessage);
+      // 补发本页已经发生过的变更，重连窗口期内发生的发布/审批不会丢。
+      for (const mutation of appliedMutations) {
+        port.postMessage({ type: "demo-mutation", mutation } satisfies UiMessage);
+      }
     } catch {
-      // Reload reconnects.
+      // 下一次重试会重新连上。
     }
     reportConnectorState(Boolean(sessionRef.current));
     // Navigating to the login view (logout, or a fresh session landing on it)
@@ -120,7 +129,7 @@ function DemoApp() {
         // Already disconnected.
       }
     };
-  }, []);
+  }, [portAttempt]);
 
   // ---- pointer annotations (laser + circle drawing) --------------------------
 

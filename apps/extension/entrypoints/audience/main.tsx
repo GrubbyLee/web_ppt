@@ -14,6 +14,8 @@ function AudienceApp() {
   const viewerId = useMemo(() => new URLSearchParams(window.location.search).get("viewer") ?? `viewer-${Math.random().toString(36).slice(2, 10)}`, []);
   const [state, setState] = useState<BroadcastState | null>(null);
   const [videoLive, setVideoLive] = useState(false);
+  // 端口重试计数：后台 SW 被回收时用它重建连接。
+  const [portAttempt, setPortAttempt] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const laserRef = useRef<HTMLDivElement>(null);
@@ -82,6 +84,11 @@ function AudienceApp() {
       }
     });
     post({ type: "hello", ctx: "audience", viewerId });
+    // 后台 SW 被回收时端口会断开：不重连观众就永远停在旧状态（页码、封面、
+    // 标注都不会再更新）。
+    port.onDisconnect.addListener(() => {
+      setTimeout(() => setPortAttempt((value) => value + 1), 500);
+    });
     return () => {
       peerRef.current?.close();
       peerRef.current = null;
@@ -91,7 +98,7 @@ function AudienceApp() {
         // Already disconnected.
       }
     };
-  }, [viewerId]);
+  }, [viewerId, portAttempt]);
 
   const machine = state?.machine ?? null;
   const demoView = machine ? demoViewFromUrl(machine.project.pages[machine.session.currentPageIndex]?.url) : null;
