@@ -60,9 +60,13 @@ export function DemoConsole(props: DemoConsoleProps) {
 
   // Mirror mode: apply replicated mutations from every state broadcast so
   // published/approved changes made in the session tab render here too.
+  // applyDemoMutation mutates module state *outside* React, so the mirror has
+  // to re-render explicitly — otherwise the replicated change only shows up on
+  // the next broadcast, which may never arrive (approval stuck at 待审批).
   useEffect(() => {
     if (props.mode !== "mirror" || !props.state) return;
     for (const mutation of props.state.meta.demoMutations) applyDemoMutation(mutation as DemoMutation);
+    forceRender((value) => value + 1);
   }, [props]);
 
   useEffect(() => {

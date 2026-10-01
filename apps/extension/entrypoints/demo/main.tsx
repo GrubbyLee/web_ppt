@@ -84,7 +84,10 @@ function DemoApp() {
       if (message.type === "state") {
         const machine = message.state.machine;
         annotationTool = machine.session.annotationTool;
+        // Same reasoning as the audience mirror: the mutations live in module
+        // state, so nudge a render after replaying them.
         for (const mutation of message.state.meta.demoMutations) applyDemoMutation(mutation as DemoMutation);
+        setOverlayTick((value) => value + 1);
         const page = machine.project.pages[machine.session.currentPageIndex];
         overlayRenderer.render({
           screenMode: machine.session.screenMode,
