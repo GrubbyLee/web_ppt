@@ -197,6 +197,12 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.dialog__hint {
+  color: #8fa0b2;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .dialog__actions {
   display: flex;
   justify-content: flex-end;

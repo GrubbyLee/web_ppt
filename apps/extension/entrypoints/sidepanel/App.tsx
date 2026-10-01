@@ -280,7 +280,7 @@ export function App() {
   const offlineActive = session.offlineFallbackPageId === page.id;
   const connectorChip = meta.connectorState
     ? meta.connectorState.state === "ready" ? { text: "业务页就绪", tone: "ok" as const }
-      : meta.connectorState.state === "anonymous" ? { text: "未登录", tone: "warn" as const }
+      : meta.connectorState.state === "anonymous" ? { text: "未登录 · 需先执行登录步骤", tone: "warn" as const }
         : meta.connectorState.state === "role-mismatch" ? { text: `角色不符${meta.connectorState.role ? `：${meta.connectorState.role}` : ""}`, tone: "warn" as const }
           : { text: meta.connectorState.reason ?? "业务页受阻", tone: "bad" as const }
     : null;
@@ -613,6 +613,7 @@ function ForceCompleteDialog({ step, reason, value, onChange, onForce, onRetry }
   return (
     <Dialog title="步骤执行失败">
       <p>{step ? step.text : "未知步骤"} — {reason ?? "动作执行失败"}。可以填写原因强制完成，或重新执行。</p>
+      <p className="dialog__hint">下一步该做什么：先在业务页完成登录（或刷新页面）再点“重新执行”；暂时无法执行可在本页工具里切“离线备用”，或填写原因后“强制完成”。</p>
       <label className="field">
         <span>强制完成原因（必填）</span>
         <textarea rows={3} value={value} maxLength={500} onChange={(event) => onChange(event.target.value)} />
