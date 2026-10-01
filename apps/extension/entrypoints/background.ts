@@ -204,7 +204,11 @@ function businessReady(): boolean {
   return (runtime.connectorState?.state ?? "ready") === "ready";
 }
 
+let pendingSecretStep: string | null = null;
+
 function missingSecrets(): string[] {
+  // 启动演示不应被敏感变量阻塞：仅当执行到依赖敏感变量的步骤时才索取.
+  if (!pendingSecretStep) return [];
   if (!machine) return [];
   return missingRuntimeSecrets(machine.session.id, machine.project.sensitiveVariables).map((variable) => variable.key);
 }
@@ -800,6 +804,14 @@ export default defineBackground(() => {
     }
     let action: Record<string, unknown>;
     try {
+      const fillInput = step.recordedAction?.type === "fill" ? step.recordedAction.input : null;
+      const sensitiveKey = fillInput?.source === "sensitive" ? fillInput.key : null;
+      if (sensitiveKey && missingRuntimeSecrets(machine.session.id, machine.project.sensitiveVariables).some((item) => item.key === sensitiveKey)) {
+        pendingSecretStep = stepId;
+        runtime.message = `步骤需要输入敏感变量“${sensitiveKey}”。`;
+        broadcastState();
+        return;
+      }
       action = resolveRecordedAction(step.recordedAction, machine.project, page, machine.session.id) as unknown as Record<string, unknown>;
     } catch {
       runtime.message = "步骤缺少敏感变量，请在控制台填写后重试。";
@@ -1297,7 +1309,10 @@ export default defineBackground(() => {
       case "secrets":
         if (machine) {
           setRuntimeSecrets(machine.session.id, machine.project.sensitiveVariables, message.values);
+          const awaiting = pendingSecretStep;
+          pendingSecretStep = null;
           broadcastState();
+          if (awaiting) void runStepExecution(awaiting);
         }
         return;
       case "execute-step":
