@@ -48,7 +48,10 @@ npm run release:extension        # 可复现 ZIP + SHA-256
 - **MV3 的硬限制**：`chrome-extension://` 页不能被 `executeScript` 注入，也**不能被 tabCapture 捕获**。因此内置演练控制台自己实现同一套连接器协议（`demo/main.tsx`），DOM 逻辑与注入脚本共用 `lib/dom-connector.ts`；远程观众要看内置示例时，会话标签会切到**中继托管的 HTTP 副本**（`apps/demo-site` 的产物）。
   - 该副本是普通 http 页，被分类为 `business`（`startCapture` 只捕获 business 标签，这是它能被远程看到的**前提**，不要改成 `demo`）。
   - 代价是 `businessReady()` 里 `demo://` 的判定（要求 `tabKind === "demo"`）对它永远为假，所以有 `isRelayHostedDemoUrl()` 分支：按注入连接器的状态判定就绪，登录关卡照旧阻断、登录后自动恢复。
-- **演示画面标签开在演示者窗口内**（即侧边栏所在窗口），不要新建独立窗口：独立窗口会让演讲者每次点击控制台都把演示页推到后台并失焦。仅"专用演示环境（无痕）"才开独立窗口。
+- **演示画面内嵌在工作台页面里**（`workbench/App.tsx` 的 `stage-viewport`）：`demo://` 页用 `DemoConsole mode="mirror"` 就地镜像，真实业务页用 `previewUrl` 的 iframe，章节/固定页就地渲染。演讲者从头到尾只看这一个页面，因此点击任何控制台控件都不会让画面失焦。
+  - 后台**仍然**有一个真实的会话标签（`runtime.sessionTabId`），它负责注入连接器、执行步骤、承载 overlay 和被 tabCapture 捕获；该标签以 `active: false` **后台运行**，绝不抢焦点、不新开窗口。观众看到的始终是它，不是工作台里那个 iframe。
+  - 因为该标签在后台，`tabCapture` 的授权手势（右键菜单 / Ctrl+Shift+9）拿不到它的 activeTab：`authorizeCapture()` 会临时聚焦它取流，再还原演示者原来的标签。改这块时要保住这个来回。
+  - 项目库是弹窗（`workbench-library__panel`，带 scrim、`role=dialog`），顶部按钮与「导入」「新建项目」并列；列表按 `LIBRARY_PAGE_SIZE` 分页，腾出的主区域就是内嵌画面。
 
 ## 编码约定
 

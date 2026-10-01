@@ -94,14 +94,14 @@ try {
   await workbench.waitForSelector(".stage-frame", { timeout: 5_000 });
   const barLabels = await workbench.$$eval(".stage-bar .toolbar-button__label", (nodes) => nodes.map((node) => node.textContent?.trim() ?? ""));
   assert(["项目库", "导入", "新建项目"].every((label) => barLabels.includes(label)), "顶栏保持 项目库 / 导入 / 新建项目");
-  if (!(await workbench.isVisible(".workbench-library--open"))) {
+  if ((await workbench.locator(".workbench-library--open").count()) === 0) {
     await workbench.getByTitle("打开本地项目库：选择或编辑演示项目").click();
   }
   await workbench.waitForSelector("text=个本地项目", { timeout: 10_000 });
   assert(await workbench.isVisible("text=云枢 · 五角色能力治理闭环"), "内置云松示例项目已初始化");
   // 项目库是弹窗：关闭后必须回到内嵌的演示画面，而不是变成空白页。
   await workbench.getByTitle("关闭项目库").click();
-  assert(!(await workbench.isVisible(".workbench-library--open")), "项目库可关闭");
+  assert((await workbench.locator(".workbench-library--open").count()) === 0, "项目库可关闭");
   assert(await workbench.isVisible(".stage-frame"), "关闭项目库后演示画面仍内嵌在工作台");
   const workbenchOverflow = await workbench.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert(workbenchOverflow <= 0, "工作台无水平溢出");

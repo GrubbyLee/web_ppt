@@ -43,6 +43,11 @@ try {
   await workbench.evaluate(() => {
     window.chrome.permissions.request = async () => true;
   });
+  // 项目库是弹窗：未展开时先点「项目库」再运行。
+  if ((await workbench.locator(".workbench-library--open").count()) === 0) {
+    await workbench.getByTitle("打开本地项目库：选择或编辑演示项目").click();
+    await workbench.waitForTimeout(600);
+  }
   await workbench.getByTitle("启动演示运行时").click();
   const trustDialog = workbench.getByRole("dialog", { name: "项目需要信任" });
   await trustDialog.waitFor({ state: "visible", timeout: 5_000 })
@@ -58,15 +63,15 @@ try {
   assert(await sidepanel.isVisible("text=1/18"), "侧边栏显示第 1/18 页");
   const stagePage = context.pages().find((page) => page.url().includes("/stage.html"));
   assert(Boolean(stagePage), "章节页以舞台幻灯片呈现");
-  // 演示画面必须是演示者窗口里的一个标签页，而不是独立窗口：否则演讲者每次点击
-  // 控制台（激光笔 / 圈选 / 翻页 / 屏幕模式）都会把演示页推到另一个窗口并让它失焦。
-  const layout = await serviceWorker.evaluate(async () => {
+  // 演示画面必须内嵌在工作台页面里：演讲者不该为了看画面而切到另一个标签/窗口，
+  // 否则每次点击控制台（激光笔 / 圈选 / 翻页 / 屏幕模式）都会让那个独立页面失焦。
+  const embedded = await workbench.locator(".stage-viewport .stage-mirror, .stage-viewport .stage-frame").count();
+  assert(embedded > 0, "演示画面直接内嵌在工作台（演讲者无需另开标签或窗口）");
+  const focus = await serviceWorker.evaluate(async () => {
     const tabs = await chrome.tabs.query({});
-    const find = (fragment) => tabs.find((tab) => (tab.url ?? "").includes(fragment));
-    return { workbench: find("/workbench.html")?.windowId ?? null, stage: find("/stage.html")?.windowId ?? null };
+    return tabs.filter((tab) => (tab.url ?? "").includes("/stage.html")).map((tab) => tab.active);
   });
-  assert(layout.stage !== null && layout.stage === layout.workbench,
-    `演示画面与控制台同处一个窗口（窗口 ${layout.stage}），点击控制台不会让演示页失焦`);
+  assert(focus.length > 0 && focus.every((active) => active === false), "会话画面标签在后台运行，不抢占演示者焦点");
   if (stagePage) {
     await stagePage.waitForSelector(".stage-slide h1", { timeout: 5_000 });
     const title = await stagePage.textContent(".stage-slide h1");
@@ -169,7 +174,10 @@ try {
   if (audiencePage) {
     await audiencePage.waitForSelector(".audience-demo .demo-app", { timeout: 8_000 });
     assert(await audiencePage.locator(".audience-demo [data-testid=approvals-table]").isVisible(), "观众镜像本地渲染当前演示视图（无需捕获授权）");
-    const mirroredApproval = await audiencePage.locator(".audience-demo [data-testid=approval-status-approved], .audience-demo [data-testid=approval-status]").first().textContent().catch(() => null);
+    // The mirror applies replicated mutations asynchronously: wait for the
+    // approved row, then read it (ordering inside the table is not asserted).
+    await audiencePage.waitForSelector(".audience-demo [data-testid=approval-status-approved]", { timeout: 8_000 });
+    const mirroredApproval = await audiencePage.locator(".audience-demo [data-testid=approval-status-approved]").first().textContent().catch(() => null);
     assert((mirroredApproval ?? "").includes("已通过"), `观众镜像复制了会话标签中的审批状态（${mirroredApproval?.trim()}）`);
     assert(await audiencePage.locator(".audience-annotation-circle").count() === 1, "观众镜像同步显示圈选标注");
     const badge = await audiencePage.textContent(".audience-badge").catch(() => null);

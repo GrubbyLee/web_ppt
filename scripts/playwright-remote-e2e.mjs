@@ -63,6 +63,11 @@ try {
   await workbench.goto(`chrome-extension://${extensionId}/workbench.html`);
   await workbench.waitForSelector("text=云枢 · 五角色能力治理闭环", { timeout: 10_000 });
   await workbench.evaluate(() => { window.chrome.permissions.request = async () => true; });
+  // 项目库是弹窗：未展开时先点「项目库」再运行。
+  if ((await workbench.locator(".workbench-library--open").count()) === 0) {
+    await workbench.getByTitle("打开本地项目库：选择或编辑演示项目").click();
+    await workbench.waitForTimeout(600);
+  }
   await workbench.getByTitle("启动演示运行时").click();
   const trustDialog = workbench.getByRole("dialog", { name: "项目需要信任" });
   await trustDialog.waitFor({ state: "visible", timeout: 5_000 })
