@@ -37,6 +37,11 @@ export type BroadcastMeta = {
   offlineOriginRequest: string | null;
   message: string | null;
   demoMutations: DemoMutationState;
+  /** URL currently shown on the dedicated session/stage tab. The workbench
+   *  embeds exactly this URL so the presenter can see the same picture inside
+   *  the console page (audiences never see this frame — they still receive the
+   *  captured tab). */
+  previewUrl: string | null;
 };
 
 export type RemoteAudienceState = {

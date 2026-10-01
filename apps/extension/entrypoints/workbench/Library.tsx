@@ -8,7 +8,11 @@ import { recordDiagnostic } from "@/lib/diagnostics";
 import { beginPresentationLaunch } from "@/lib/presentation-launch";
 import { ToolbarButton } from "@/components/ToolbarButton";
 import type { WorkbenchPort } from "./App";
-import { Archive, Copy, Download, FileDown, FileUp, FolderOpen, Play, Plus, ShieldOff, TriangleAlert, Trash2 } from "lucide-react";
+import { Archive, ChevronLeft, ChevronRight, Copy, Download, FileDown, FileUp, FolderOpen, Play, Plus, ShieldOff, TriangleAlert, Trash2 } from "lucide-react";
+
+/** Projects per page: the library is a popup over the embedded picture, so the
+ *  list must not become an endlessly scrolling column. */
+const LIBRARY_PAGE_SIZE = 6;
 
 type LibraryState = "loading" | "ready" | "error";
 type PackageDialog = { mode: "export"; project: Project } | { mode: "import"; content: ArrayBuffer };
@@ -38,7 +42,14 @@ async function originPatternsForProject(project: Project): Promise<string[]> {
   return [...origins].filter((origin) => origin.startsWith("https:") || origin.startsWith("http:")).map((origin) => `${origin}/*`);
 }
 
-export function Library({ port }: { port: WorkbenchPort }) {
+export type LibraryToolbarApi = {
+  requestImport: () => void;
+  requestCreate: () => void;
+};
+
+/** When `embedded`, the library renders without its own top bar: the host page
+ *  owns 导入 / 新建项目 so those actions stay next to the 项目库 opener. */
+export function Library({ port, embedded, registerToolbar }: { port: WorkbenchPort; embedded?: boolean; registerToolbar?: (api: LibraryToolbarApi | null) => void }) {
   const importInput = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<LibraryState>("loading");
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -46,6 +57,7 @@ export function Library({ port }: { port: WorkbenchPort }) {
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [packageDialog, setPackageDialog] = useState<PackageDialog | null>(null);
+  const [listPage, setListPage] = useState(0);
   const [packagePassword, setPackagePassword] = useState("");
   const [packagePasswordConfirm, setPackagePasswordConfirm] = useState("");
   const [packageError, setPackageError] = useState<string | null>(null);
@@ -69,6 +81,16 @@ export function Library({ port }: { port: WorkbenchPort }) {
       }
     })();
   }, []);
+
+  // The host page renders 导入 / 新建项目 itself; hand it a way to drive them.
+  useEffect(() => {
+    if (!registerToolbar) return;
+    registerToolbar({
+      requestImport: () => importInput.current?.click(),
+      requestCreate: () => setCreating(true)
+    });
+    return () => registerToolbar(null);
+  }, [registerToolbar]);
 
   const persist = async (workspace: Workspace) => {
     await saveWorkspace(workspace);
@@ -224,19 +246,28 @@ export function Library({ port }: { port: WorkbenchPort }) {
   if (state === "loading") return <main className="project-loading">正在打开本地项目库…</main>;
   if (state === "error") return <main className="project-loading project-loading--error"><TriangleAlert size={18} /> {message}</main>;
 
+  // The library is a popup over the embedded picture, so the list is paged
+  // instead of an endlessly scrolling column.
+  const pageCount = Math.max(1, Math.ceil(workspaces.length / LIBRARY_PAGE_SIZE));
+  const pageIndex = Math.min(listPage, pageCount - 1);
+  const visibleWorkspaces = workspaces.slice(pageIndex * LIBRARY_PAGE_SIZE, pageIndex * LIBRARY_PAGE_SIZE + LIBRARY_PAGE_SIZE);
+
   return (
     <main className="project-workspace">
-      <header className="workspace-topbar">
-        <div>
-          <strong>Showit</strong>
-          <span>本地演示项目</span>
-        </div>
-        <section className="workspace-actions" aria-label="项目库操作">
-          <ToolbarButton icon={<FileUp size={16} />} label="导入" title="导入 .showit 项目文件" onClick={() => importInput.current?.click()} />
-          <ToolbarButton icon={<Plus size={16} />} label="新建项目" title="创建演示项目" variant="primary" onClick={() => setCreating(true)} />
-          <input ref={importInput} className="visually-hidden" type="file" accept=".showit,.json,application/json" onChange={(event) => void importProject(event.target.files?.[0])} />
-        </section>
-      </header>
+      {embedded ? null : (
+        <header className="workspace-topbar">
+          <div>
+            <strong>Showit</strong>
+            <span>本地演示项目</span>
+          </div>
+          <section className="workspace-actions" aria-label="项目库操作">
+            <ToolbarButton icon={<FileUp size={16} />} label="导入" title="导入 .showit 项目文件" onClick={() => importInput.current?.click()} />
+            <ToolbarButton icon={<Plus size={16} />} label="新建项目" title="创建演示项目" variant="primary" onClick={() => setCreating(true)} />
+          </section>
+        </header>
+      )}
+      {/* Kept mounted when embedded too: the host page's 导入 button clicks it. */}
+      <input ref={importInput} className="visually-hidden" type="file" accept=".showit,.json,application/json" onChange={(event) => void importProject(event.target.files?.[0])} />
 
       <section className="workspace-body" aria-label="演示项目列表">
         <div className="workspace-heading">
@@ -259,7 +290,7 @@ export function Library({ port }: { port: WorkbenchPort }) {
         ) : null}
 
         <div className="project-list">
-          {workspaces.map((workspace) => {
+          {visibleWorkspaces.map((workspace) => {
             const { project } = workspace;
             return (
               <article className={`project-row project-row--${project.status}`} key={project.id}>
@@ -323,6 +354,14 @@ export function Library({ port }: { port: WorkbenchPort }) {
             );
           })}
         </div>
+
+        {pageCount > 1 ? (
+          <nav className="project-pager" aria-label="项目库分页">
+            <ToolbarButton icon={<ChevronLeft size={14} />} title="上一页" disabled={pageIndex === 0} onClick={() => setListPage(pageIndex - 1)} />
+            <span>第 {pageIndex + 1} / {pageCount} 页</span>
+            <ToolbarButton icon={<ChevronRight size={14} />} title="下一页" disabled={pageIndex >= pageCount - 1} onClick={() => setListPage(pageIndex + 1)} />
+          </nav>
+        ) : null}
       </section>
 
       {packageDialog !== null ? (
