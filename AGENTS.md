@@ -39,6 +39,7 @@ npm run release:extension        # 可复现 ZIP + SHA-256
 ```
 
 浏览器回归需要 Chromium 与虚拟显示：`xvfb-run -a npm run test:extension-demo-e2e`（CI 同款）。
+- 改 UI 后若无法肉眼看图，可在页面里用 `page.evaluate` 量出元素盒子（x/width/height）与按钮文案来核对对齐与可点面积；注意 overlay 挂在 `documentElement` 而非 `body` 上，`textContent("body")` 会漏判封面。
 
 ## 架构约束
 

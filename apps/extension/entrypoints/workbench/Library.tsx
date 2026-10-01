@@ -306,17 +306,20 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
                     if (project.status === "archived" && !window.confirm(`“${project.name}”已归档，仍要启动演示吗？`)) return;
                     void runProject(workspace);
                   }} />
-                  <ToolbarButton icon={<FolderOpen size={16} />} title="编辑项目" onClick={() => {
+                  <ToolbarButton icon={<FolderOpen size={16} />} label="编辑" title="编辑项目" onClick={() => {
                     if (embedded) openEditor(project.id);
                     else window.location.hash = `#/p/${project.id}`;
                   }} />
-                  <ToolbarButton icon={<Copy size={16} />} title="复制项目" onClick={() => void (async () => {
+                  <ToolbarButton icon={<Copy size={16} />} label="复制" title="复制项目" onClick={() => void (async () => {
                     const sourceTrusted = await projectTrustState(project) === "trusted";
                     const duplicate = duplicateProject(project);
                     await persist({ project: duplicate, session: createSession(duplicate) });
                     if (sourceTrusted) await trustProject(duplicate);
                     setMessage(`已创建“${project.name}”的副本${sourceTrusted ? "，并继承运行信任" : ""}。`);
                   })()} />
+                  {/* 侧边栏只放「选项目 / 运行」相关的动作，完整管理交给工作台页面。 */}
+                  {embedded ? null : (
+                    <>
                   <ToolbarButton icon={<FileDown size={16} />} title="导出 .showit 文件" onClick={() => { setPackageDialog({ mode: "export", project }); setPackageError(null); }} />
                   <ToolbarButton icon={<ShieldOff size={16} />} title="取消项目信任，停止脚本和自动操作运行" onClick={() => void (async () => {
                     await forgetProjectTrust(project.id);
@@ -336,8 +339,11 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
                         .then((status) => persist({ ...workspace, project: { ...project, status } }));
                     }}
                   />
+                    </>
+                  )}
                   <ToolbarButton
                     icon={<Trash2 size={16} />}
+                    label="删除"
                     title="删除项目"
                     variant="danger"
                     onClick={() => void (async () => {

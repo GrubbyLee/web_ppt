@@ -160,8 +160,8 @@
 }
 
 .panel-page__tools {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
   gap: 6px;
 }
 
@@ -547,17 +547,81 @@
   font-size: 18px;
 }
 
+/* 侧边栏宽度下改用卡片式单列：桌面端两列栅格（actions 跨行）会错位。 */
+
 .panel-library .project-row {
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.panel-library .project-row__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
 }
 
 .panel-library .project-row__actions {
-  grid-area: auto;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.panel-library .project-row__actions .toolbar-button {
+  width: 100%;
 }
 
 .panel--library {
   align-items: stretch;
   gap: 0;
   padding: 0;
+}
+
+/* ---- 控制台分组：有文字标签、等宽网格、更大的点击区 ---- */
+
+.panel .toolbar-button {
+  min-height: 34px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.panel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.panel-group__title {
+  color: var(--muted-400);
+  letter-spacing: 0.06em;
+  font-size: 11px;
+}
+
+.panel-group__actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+}
+
+.panel-page-nav {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.panel-page-jump {
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-700);
+  border-radius: 7px;
+  background: var(--ink-850);
+  color: var(--paper-100);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.panel-group--end {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-700);
 }
