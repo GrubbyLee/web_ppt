@@ -1,5 +1,5 @@
 import { inflateSync, deflateSync } from "node:zlib";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 
@@ -229,11 +229,14 @@ const AUDIT = () => {
  * 用来回答"演讲者一眼能不能看懂"：把首屏与演示中的控制台分别量出文字层级、
  * 按钮尺寸/对比度，并把业务画面与控制台合成为演讲者真正看到的一屏，算出墨量
  * 密度图。模型看不到图，只能靠这些量化证据判断视觉重量是否压在画面上。
- */────────────────────────────────────────────────────── */
+ */
+
 
 const root = "/home/arabica/codes/showit";
 const extensionDir = resolve(root, "apps/extension/.output/chrome-mv3");
-const out = "/tmp/audit";
+const outDir = resolve(root, "test-results", "ux-audit");
+mkdirSync(outDir, { recursive: true });
+const out = resolve(outDir, "shot");
 const PANEL_W = 420;
 const WIN_W = 1440;
 const WIN_H = 900;
@@ -324,4 +327,51 @@ for (const t of consoleState.texts.filter((x) => x.contrast !== null && x.contra
 console.log("-- 点击区高度 < 32px 的按钮 --");
 for (const b of consoleState.buttons.filter((x) => x.h < 32)) console.log(`  ${b.w}x${b.h} 「${b.text}」`);
 
+// 5) 「更多」展开态，确认三级收纳是什么样子
+await panel.locator(".panel-group--deliver").getByText("更多").click();
+await panel.waitForTimeout(500);
+await panel.screenshot({ path: `${out}-5-console-p6-more.png` });
+{
+  const left = decodePng(`${out}-3b-stage-p6.png`);
+  const right = decodePng(`${out}-5-console-p6-more.png`);
+  const W = left.w + right.w;
+  const H = Math.max(left.h, right.h);
+  const composite = Buffer.alloc(W * H * 4, 255);
+  const blit = (img, x0) => {
+    for (let y = 0; y < img.h; y += 1) {
+      for (let x = 0; x < img.w; x += 1) {
+        const s0 = (y * img.w + x) * 4;
+        const d = (y * W + (x + x0)) * 4;
+        composite[d] = img.pixels[s0];
+        composite[d + 1] = img.pixels[s0 + 1];
+        composite[d + 2] = img.pixels[s0 + 2];
+        composite[d + 3] = 255;
+      }
+    }
+  };
+  blit(left, 0);
+  blit(right, left.w);
+  encodePng(W, H, composite, `${out}-6-composite-p6-more.png`);
+}
+
+// 6) 对照页：一张页面看完全部截图
+const shots = [
+  ["shot-1-first.png", "① 第一眼：打开侧边栏就是项目库（演讲前该点哪里）"],
+  ["shot-2-console.png", "② 演示中控制台（第 1 页 · 封面）"],
+  ["shot-2b-console-p6.png", "③ 演示中控制台（第 6 页 · 真实内容页）"],
+  ["shot-3b-stage-p6.png", "④ 左侧业务画面（第 6 页）"],
+  ["shot-4-composite.png", "⑤ 合成视图：演讲者真正看到的一屏（左业务 1020 / 右控制台 420）"],
+  ["shot-6-composite-p6-more.png", "⑥ 合成视图：「更多」展开后（三级操作收纳处）"]
+];
+writeFileSync(resolve(outDir, "index.html"), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>Showit 演示者视角效果对照</title>
+<style>body{background:#0d1015;color:#e9eff4;font-family:system-ui;margin:0;padding:20px}
+h1{font-size:18px;margin:0 0 4px}p.lead{color:#8fa0b2;font-size:13px;margin:0 0 18px}
+figure{margin:0 0 26px}h2{font-size:14px;margin:0 0 6px;color:#37d0ba}
+img{border:1px solid #303b49;border-radius:8px;max-width:100%;display:block;background:#fff}</style></head>
+<body><h1>Showit 演示者视角效果对照</h1>
+<p class="lead">左业务系统（真实标签） / 右側边栏控制台，同一窗口内。合成图即演讲者屏幕上看到的一屏。</p>
+${shots.map(([file, title]) => `<figure><h2>${title}</h2><img src="${file}"></figure>`).join("")}
+</body></html>`);
+console.log("\n截图与对照页已输出到: " + outDir);
 await ctx.close();
