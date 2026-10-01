@@ -52,12 +52,14 @@ export function App() {
   /** 项目库：演示开始前用于选项目/编辑项目，演示开始后自动隐藏，
    *  左侧完全交给业务系统画面；可随时用控制台按钮呼出。 */
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const libraryAutoClosedRef = useRef(false);
+  // 按会话判定，而不是一次性标记：演示中再次运行另一个项目时也要重新隐藏项目库。
+  const libraryAutoClosedRef = useRef<string | null>(null);
   const [relayBase, setRelayBase] = useState("");
   const [relayCopied, setRelayCopied] = useState(false);
   const portRef = useRef<Browser.runtime.Port | null>(null);
   const notesEditingRef = useRef(false);
-  notesEditingRef.current = notesEditing || dialog !== null;
+  // 翻阅项目库时同样算「演示者正忙」：此时不应自动翻页。
+  notesEditingRef.current = notesEditing || dialog !== null || libraryOpen;
 
   const send = useCallback((message: UiMessage) => {
     try {
@@ -83,6 +85,7 @@ export function App() {
       portRef.current = port;
       port.onMessage.addListener((message: BgMessage) => {
         if (message.type === "state") setState(message.state);
+        if (message.type === "session-started") setLibraryOpen(false);
       });
       port.onDisconnect.addListener(() => {
         if (portRef.current === port) portRef.current = null;
@@ -141,11 +144,14 @@ export function App() {
 
   useEffect(() => {
     // Starting a presentation hands the whole window to the business system.
-    if (machine && !libraryAutoClosedRef.current) {
-      libraryAutoClosedRef.current = true;
+    if (!machine) {
+      libraryAutoClosedRef.current = null;
+      return;
+    }
+    if (libraryAutoClosedRef.current !== machine.session.id) {
+      libraryAutoClosedRef.current = machine.session.id;
       setLibraryOpen(false);
     }
-    if (!machine) libraryAutoClosedRef.current = false;
   }, [machine]);
 
   useEffect(() => {

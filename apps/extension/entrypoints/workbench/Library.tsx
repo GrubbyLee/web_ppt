@@ -143,11 +143,10 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
     await trustProject(project);
     setName("");
     setCreating(false);
-    // In the side panel there is no route to navigate: hand the editor to a tab.
+    // In the side panel there is no route to navigate: hand the editor its own
+    // window so the presenter window stays on the business system.
     if (embedded) {
-      void browser.tabs.create({ url: browser.runtime.getURL(`/workbench.html#/p/${project.id}`) }).catch((error) => {
-        recordDiagnostic("打开项目编辑器", error);
-      });
+      openEditor(project.id);
       return;
     }
     window.location.hash = `#/p/${project.id}`;
@@ -243,8 +242,10 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
   const pageIndex = Math.min(listPage, pageCount - 1);
   const visibleWorkspaces = workspaces.slice(pageIndex * LIBRARY_PAGE_SIZE, pageIndex * LIBRARY_PAGE_SIZE + LIBRARY_PAGE_SIZE);
 
-  const openEditorTab = (id: string) => {
-    void browser.tabs.create({ url: browser.runtime.getURL(`/workbench.html#/p/${id}`) }).catch((error) => {
+  /** The editor is a full-page UI. Opened from the side panel it gets its own
+   *  window, so the presenter window keeps showing business system + console. */
+  const openEditor = (id: string) => {
+    void browser.windows.create({ url: browser.runtime.getURL(`/workbench.html#/p/${id}`), focused: true }).catch((error) => {
       recordDiagnostic("打开项目编辑器", error);
     });
   };
@@ -306,7 +307,7 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
                     void runProject(workspace);
                   }} />
                   <ToolbarButton icon={<FolderOpen size={16} />} title="编辑项目" onClick={() => {
-                    if (embedded) openEditorTab(project.id);
+                    if (embedded) openEditor(project.id);
                     else window.location.hash = `#/p/${project.id}`;
                   }} />
                   <ToolbarButton icon={<Copy size={16} />} title="复制项目" onClick={() => void (async () => {

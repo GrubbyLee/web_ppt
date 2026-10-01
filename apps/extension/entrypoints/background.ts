@@ -47,7 +47,7 @@ const runtime = {
   sessionTabId: null as number | null,
   /** Presenter window: the window hosting the side panel console. The session
    *  tab is created here so console clicks never push the stage into a
-   *  background window (see openSessionWindow). */
+   *  background window (see openSessionSurface). */
   presenterWindowId: null as number | null,
   /** True when the session owns a whole window (dedicated/incognito) that must
    *  be closed on exit; false when it only added a tab to the presenter
@@ -622,7 +622,7 @@ async function resolvePresenterWindowId(): Promise<number | null> {
  *  window would be pushed behind the console window on every click.
  *  Only a dedicated (incognito) session gets its own window, because an
  *  incognito profile cannot share the presenter's normal window. */
-async function openSessionWindow(targetUrl: string, hostWindowId?: number | null): Promise<void> {
+async function openSessionSurface(targetUrl: string, hostWindowId?: number | null): Promise<void> {
   const dedicated = machine?.session.browserSessionMode === "dedicated";
   let incognito = false;
   if (dedicated) {
@@ -1262,6 +1262,15 @@ export default defineBackground(() => {
       port?.postMessage({ type: "error", message: "项目尚未信任或内容已变化，请先在项目库确认信任。" });
       return;
     }
+    // Launching again must not leave the previous session running: that would
+    // keep a second live instance of the business system behind (duplicate
+    // session state, duplicate writes) and leak a tab in the presenter window.
+    if (runtime.sessionTabId !== null) {
+      await browser.tabs.remove(runtime.sessionTabId).catch(() => undefined);
+    }
+    if (machine) clearRuntimeSecrets(machine.session.id);
+    await stopCapture().catch(() => undefined);
+
     const launch = beginPresentationLaunch(workspace.project, workspace.session);
     machine = applyAction(initialMachineState(), { type: "set-workspace", project: launch.project, session: launch.session }).state;
     runtime.sessionWindowId = null;
@@ -1273,14 +1282,17 @@ export default defineBackground(() => {
     await applyProtectionRules();
     // The launcher (workbench/editor tab) lives in the window that just opened
     // the side panel — that is the presenter window the stage belongs to.
-    await openSessionWindow(targetUrlForPage(currentPage()), port?.sender?.tab?.windowId ?? null);
+    await openSessionSurface(targetUrlForPage(currentPage()), port?.sender?.tab?.windowId ?? null);
     broadcastState();
+    // Explicit signal: a re-run reuses the persisted session id, so UIs cannot
+    // detect "a new talk began" from the state alone.
+    postToAll({ type: "session-started" });
   }
 
   async function resumeSession(): Promise<void> {
     if (!machine) return;
     if (runtime.sessionTabId === null) {
-      await openSessionWindow(targetUrlForPage(currentPage()));
+      await openSessionSurface(targetUrlForPage(currentPage()));
     } else {
       await syncSessionTab(true);
     }

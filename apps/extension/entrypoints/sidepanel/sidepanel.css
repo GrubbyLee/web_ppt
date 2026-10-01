@@ -555,3 +555,9 @@
   grid-area: auto;
   justify-content: flex-start;
 }
+
+.panel--library {
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}

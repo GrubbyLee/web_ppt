@@ -89,6 +89,9 @@ export type UiMessage =
 
 export type BgMessage =
   | { type: "state"; state: BroadcastState }
+  /** A presentation run just started (also when a running one is replaced):
+   *  surfaces that hide for the talk (e.g. the project library) step aside. */
+  | { type: "session-started" }
   | { type: "relay-opened"; room: RemoteAudienceState }
   | { type: "relay-closed"; reason?: string }
   | { type: "relay-signal"; to: string; from: string; data: unknown }
