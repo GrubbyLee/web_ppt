@@ -1,7 +1,7 @@
 /** Signal message validation: the relay forwards envelopes it can parse and
  *  rejects everything else (size limits, unknown types, malformed shapes). */
 
-const MAX_SIGNAL_BYTES = 128 * 1_024;
+export const MAX_SIGNAL_BYTES = 128 * 1_024;
 
 export type SignalEnvelope = {
   type: "join" | "offer" | "answer" | "ice" | "leave" | "preference";

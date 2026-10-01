@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RelayError, RoomStore, type Room } from "./rooms";
-import { sanitizeSignalMessage, type SignalEnvelope } from "./signal";
+import { sanitizeSignalMessage, MAX_SIGNAL_BYTES, type SignalEnvelope } from "./signal";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -383,7 +383,10 @@ class SignalSockets {
 
 const signalSockets = new SignalSockets();
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 160 * 1_024 });
+// Transport ceiling = app-layer limit + generous envelope overhead, so an
+// oversized SDP is rejected by signal.ts (silent drop) instead of tripping the
+// transport layer. Anything above this still raises 'error' on the socket.
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_SIGNAL_BYTES + 128 * 1_024 });
 
 server.on("upgrade", (request, socket, head) => {
   const url = (request.url ?? "").split("?")[0]!;
@@ -465,6 +468,19 @@ server.on("upgrade", (request, socket, head) => {
         return;
       }
       signalSockets.deliver(roomCode, envelope.to, envelope);
+    });
+
+    // Framing/protocol errors (oversized frames, invalid UTF-8) are emitted as
+    // 'error' before 'close'. Without a listener they surface as an uncaught
+    // exception and take the whole relay down — one peer must never do that.
+    ws.on("error", (error) => {
+      console.error("[relay] signal socket error:", error?.message ?? "unknown");
+      signalSockets.remove(client);
+      try {
+        ws.close(4000, "protocol-error");
+      } catch {
+        // Already closing.
+      }
     });
 
     ws.on("close", () => {
