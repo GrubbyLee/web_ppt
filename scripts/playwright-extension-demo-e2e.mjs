@@ -176,16 +176,32 @@ try {
   await sidepanel.waitForTimeout(800);
   assert(await demoPage.locator("[data-showit-overlay] .showit-circle").count() === 1, "圈选标注已渲染在演示页");
 
+  const openedAt = Date.now();
   await sidepanel.locator(".panel-group--deliver").getByText("共享画面").click();
-  await sidepanel.waitForTimeout(1_500);
-  const audiencePage = context.pages().find((page) => page.url().includes("/audience.html"));
+  // 轮询等待窗口出现：固定 sleep 在机器繁忙时不够，会误判成"没打开"。
+  let audiencePage = null;
+  for (let attempt = 0; attempt < 60 && !audiencePage; attempt += 1) {
+    audiencePage = context.pages().find((page) => page.url().includes("/audience.html")) ?? null;
+    if (!audiencePage) await sidepanel.waitForTimeout(250);
+  }
   assert(Boolean(audiencePage), "观众窗口已打开");
   if (audiencePage) {
-    await audiencePage.waitForSelector(".audience-demo .demo-app", { timeout: 8_000 });
+    await audiencePage.waitForSelector(".audience-demo .demo-app", { timeout: 15_000 });
+    console.log(`    观众窗口就绪 ${Date.now() - openedAt}ms`);
     assert(await audiencePage.locator(".audience-demo [data-testid=approvals-table]").isVisible(), "观众镜像本地渲染当前演示视图（无需捕获授权）");
     // The mirror applies replicated mutations asynchronously: wait for the
     // approved row, then read it (ordering inside the table is not asserted).
-    await audiencePage.waitForSelector(".audience-demo [data-testid=approval-status-approved]", { timeout: 8_000 });
+    const syncStart = Date.now();
+    try {
+      await audiencePage.waitForSelector(".audience-demo [data-testid=approval-status-approved]", { timeout: 15_000 });
+    } catch (error) {
+      const mirrorText = await audiencePage.textContent(".audience-demo").catch(() => "(读不到)");
+      const sideText = await sidepanel.textContent(".panel-page").catch(() => "(读不到)");
+      console.log("    !!! 诊断：镜像内容=", mirrorText?.replace(/\s+/g, " ").slice(0, 200));
+      console.log("    !!! 诊断：控制台当前页=", sideText?.replace(/\s+/g, " ").slice(0, 120));
+      throw error;
+    }
+    console.log(`    审批状态同步耗时 ${Date.now() - syncStart}ms`);
     const mirroredApproval = await audiencePage.locator(".audience-demo [data-testid=approval-status-approved]").first().textContent().catch(() => null);
     assert((mirroredApproval ?? "").includes("已通过"), `观众镜像复制了会话标签中的审批状态（${mirroredApproval?.trim()}）`);
     assert(await audiencePage.locator(".audience-annotation-circle").count() === 1, "观众镜像同步显示圈选标注");
