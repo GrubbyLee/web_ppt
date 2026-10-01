@@ -13,11 +13,14 @@ import { resolveTemplate } from "@/lib/template";
 import { runProjectPreflight } from "@/lib/preflight";
 import { downloadMarkdownScript } from "@/lib/export";
 import { downloadDiagnostics, listDiagnostics } from "@/lib/diagnostics";
+import { Library } from "../workbench/Library";
+import type { WorkbenchPort } from "../workbench/App";
 import {
   CircleDot,
   Eraser,
   FileText,
   FlaskConical,
+  FolderTree,
   Keyboard,
   MonitorPlay,
   Moon,
@@ -46,6 +49,10 @@ export function App() {
   const [health, setHealth] = useState<Array<{ pageId: string; ok: boolean; status: number | null; error: string | null; elapsedMs: number }>>([]);
   const [healthBusy, setHealthBusy] = useState(false);
   const [diagnosticEntries, setDiagnosticEntries] = useState<Array<{ traceId: string; at: number; area: string; message: string }>>([]);
+  /** 项目库：演示开始前用于选项目/编辑项目，演示开始后自动隐藏，
+   *  左侧完全交给业务系统画面；可随时用控制台按钮呼出。 */
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const libraryAutoClosedRef = useRef(false);
   const [relayBase, setRelayBase] = useState("");
   const [relayCopied, setRelayCopied] = useState(false);
   const portRef = useRef<Browser.runtime.Port | null>(null);
@@ -130,6 +137,16 @@ export function App() {
   const project = machine?.project ?? null;
 
   const act = useCallback((action: SessionAction) => send({ type: "action", action }), [send]);
+  const libraryPort = useMemo<WorkbenchPort>(() => ({ send }), [send]);
+
+  useEffect(() => {
+    // Starting a presentation hands the whole window to the business system.
+    if (machine && !libraryAutoClosedRef.current) {
+      libraryAutoClosedRef.current = true;
+      setLibraryOpen(false);
+    }
+    if (!machine) libraryAutoClosedRef.current = false;
+  }, [machine]);
 
   useEffect(() => {
     if (session?.pendingHighRiskStepId && dialog === null) setDialog("high-risk");
@@ -260,17 +277,26 @@ export function App() {
 
   // ---- landing -----------------------------------------------------------------
 
-  if (!machine || !session || !project || !page || !meta) {
+  if (!machine || !session || !project || !page || !meta || libraryOpen) {
     return (
-      <main className="panel panel--landing">
-        <header className="panel-brand"><strong>Showit</strong><span>演讲者控制台</span></header>
-        <section className="landing">
-          <p>{machine ? (meta?.live ? "正在同步演示会话…" : "演示会话已恢复，但画面标签未连接。") : "当前没有正在运行的演示。"}</p>
-          {machine && !meta?.live ? <ToolbarButton icon={<Play size={16} />} label="恢复画面标签" variant="primary" onClick={() => send({ type: "resume" })} /> : null}
-          <ToolbarButton icon={<FileText size={16} />} label="打开工作台" onClick={() => send({ type: "open-workbench" })} />
-          <ToolbarButton icon={<Keyboard size={16} />} label="快捷键" onClick={() => setDialog("shortcuts")} />
-        </section>
-        {machine ? <SessionSummary session={machine.session} now={now} /> : null}
+      <main className="panel panel--landing panel--library">
+        <header className="panel-brand">
+          <strong>Showit</strong>
+          <span className="panel-brand__project">{libraryOpen ? "项目库" : "演讲者控制台"}</span>
+          {libraryOpen ? <ToolbarButton icon="✕" label="返回控制台" onClick={() => setLibraryOpen(false)} /> : null}
+        </header>
+        <div className="panel-library">
+          <Library port={libraryPort} embedded />
+        </div>
+        {!libraryOpen ? (
+          <section className="landing">
+            <p>{machine ? (meta?.live ? "正在同步演示会话…" : "演示会话已恢复，但画面标签未连接。") : "从上方项目库选择一个项目并运行；演示开始后左侧就是业务系统画面。"}</p>
+            {machine && !meta?.live ? <ToolbarButton icon={<Play size={16} />} label="恢复画面标签" variant="primary" onClick={() => send({ type: "resume" })} /> : null}
+            <ToolbarButton icon={<FileText size={16} />} label="在标签页中打开工作台" onClick={() => send({ type: "open-workbench" })} />
+            <ToolbarButton icon={<Keyboard size={16} />} label="快捷键" onClick={() => setDialog("shortcuts")} />
+          </section>
+        ) : null}
+        {machine && !libraryOpen ? <SessionSummary session={machine.session} now={now} /> : null}
         <ShortcutsDialog open={dialog === "shortcuts"} onClose={() => setDialog(null)} />
       </main>
     );
@@ -301,6 +327,7 @@ export function App() {
         <span className="chip chip--muted">{timerStatusLabel(session.timerStatus)}</span>
         {session.screenMode !== "normal" ? <span className="chip chip--warn">{screenModeLabel(session.screenMode)}</span> : null}
         <span className="chip chip--muted">{meta.viewerCount > 0 || machine.localAudience ? `观众 ${meta.viewerCount}` : "无观众"}</span>
+        <ToolbarButton icon={<FolderTree size={14} />} title="项目库：查看项目数量、切换要演示的项目（演示开始前使用）" onClick={() => setLibraryOpen(true)} />
       </header>
 
       <section className="panel-page" aria-label="当前页面">

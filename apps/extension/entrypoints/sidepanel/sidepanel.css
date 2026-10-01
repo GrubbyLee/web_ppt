@@ -521,3 +521,37 @@
   flex: 1;
   font-size: 12.5px;
 }
+
+/* ---- 项目库（嵌入侧边栏控制台，可呼出/隐藏） ---- */
+
+.panel-library {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.panel-library .project-workspace {
+  min-height: 100%;
+}
+
+.panel-library .workspace-topbar {
+  padding: 8px 12px;
+}
+
+.panel-library .workspace-body {
+  max-width: none;
+  padding: 12px;
+}
+
+.panel-library .workspace-heading h1 {
+  font-size: 18px;
+}
+
+.panel-library .project-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.panel-library .project-row__actions {
+  grid-area: auto;
+  justify-content: flex-start;
+}
