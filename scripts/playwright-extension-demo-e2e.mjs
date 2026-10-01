@@ -78,6 +78,15 @@ try {
     assert((title ?? "").includes("云枢"), `封面标题：${title?.trim()}`);
   }
 
+  console.log("2b) 演示中再次运行：项目库隐藏且不残留会话标签");
+  await sidepanel.getByTitle(/^项目库/).click();
+  await sidepanel.waitForSelector(".panel-library", { timeout: 5_000 });
+  await sidepanel.getByTitle("启动演示运行时").click();
+  await sidepanel.waitForTimeout(2_500);
+  assert((await sidepanel.locator(".panel-library").count()) === 0, "重新运行后项目库自动隐藏");
+  const stageTabs = await serviceWorker.evaluate(async () => (await chrome.tabs.query({})).filter((tab) => (tab.url ?? "").includes("/stage.html")).length);
+  assert(stageTabs === 1, `重新运行后只剩一个会话画面标签（${stageTabs}），未残留上一个业务实例`);
+
   console.log("3) 进入演示页与登录关卡");
   const navNext = sidepanel.locator(".panel-footer__nav").getByTitle("下一页");
   for (let index = 0; index < 5; index += 1) {
