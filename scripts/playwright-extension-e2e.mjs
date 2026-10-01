@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
+import { freshProfileDir } from "./e2e-profile.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const resultsDir = resolve(root, "test-results");
@@ -46,7 +47,7 @@ const assert = (condition, message) => {
   console.log(`  ✓ ${message}`);
 };
 
-const context = await chromium.launchPersistentContext(resolve(resultsDir, "extension-e2e-profile"), {
+const context = await chromium.launchPersistentContext(await freshProfileDir("extension-e2e-profile"), {
   headless: false,
   viewport: { width: 1440, height: 900 },
   args: [

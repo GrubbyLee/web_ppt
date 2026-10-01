@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { chromium } from "playwright";
+import { freshProfileDir } from "./e2e-profile.mjs";
 
 /**
  * End-to-end product verification against the BUILT-IN demo sample
@@ -19,7 +20,7 @@ const assert = (condition, message) => {
   console.log(`  ✓ ${message}`);
 };
 
-const context = await chromium.launchPersistentContext(resolve(resultsDir, "extension-demo-e2e-profile"), {
+const context = await chromium.launchPersistentContext(await freshProfileDir("extension-demo-e2e-profile"), {
   headless: false,
   viewport: { width: 1440, height: 900 },
   args: [
@@ -57,17 +58,20 @@ try {
   assert(await sidepanel.isVisible("text=1/18"), "侧边栏显示第 1/18 页");
   const stagePage = context.pages().find((page) => page.url().includes("/stage.html"));
   assert(Boolean(stagePage), "章节页以舞台幻灯片呈现");
+  // 演示画面必须是演示者窗口里的一个标签页，而不是独立窗口：否则演讲者每次点击
+  // 控制台（激光笔 / 圈选 / 翻页 / 屏幕模式）都会把演示页推到另一个窗口并让它失焦。
+  const layout = await serviceWorker.evaluate(async () => {
+    const tabs = await chrome.tabs.query({});
+    const find = (fragment) => tabs.find((tab) => (tab.url ?? "").includes(fragment));
+    return { workbench: find("/workbench.html")?.windowId ?? null, stage: find("/stage.html")?.windowId ?? null };
+  });
+  assert(layout.stage !== null && layout.stage === layout.workbench,
+    `演示画面与控制台同处一个窗口（窗口 ${layout.stage}），点击控制台不会让演示页失焦`);
   if (stagePage) {
     await stagePage.waitForSelector(".stage-slide h1", { timeout: 5_000 });
     const title = await stagePage.textContent(".stage-slide h1");
     assert((title ?? "").includes("云枢"), `封面标题：${title?.trim()}`);
   }
-
-  console.log("4) 敏感变量收集");
-  await sidepanel.waitForSelector(".dialog", { timeout: 8_000 });
-  await sidepanel.locator("[data-testid=secrets-input], .dialog input[type=password]").first().fill("cloudpivot-demo-2026");
-  await sidepanel.getByText("提交并继续").click();
-  await sidepanel.waitForTimeout(600);
 
   console.log("3) 进入演示页与登录关卡");
   const navNext = sidepanel.locator(".panel-footer__nav").getByTitle("下一页");
@@ -84,14 +88,19 @@ try {
   await sidepanel.waitForSelector("text=未登录", { timeout: 8_000 });
   assert(true, "侧边栏显示未登录（连接器状态）");
 
-  console.log("5) 登录步骤链（账号 → 敏感密码 → 登录）");
+  console.log("4) 登录步骤链（账号 → 敏感密码 → 登录）");
   const stepButton = (index) => sidepanel.locator(".panel-steps__list .panel-step").nth(index);
   await stepButton(1).click();
   await sidepanel.waitForTimeout(1_200);
   const accountValue = await demoPage.locator("[data-testid=login-username]").inputValue();
   assert(accountValue === "demo@cloudpivot.cn", `账号已自动填写（${accountValue}）`);
 
+  // 敏感变量按需索取：启动演示不再被阻塞，执行到依赖它的步骤时才弹窗。
   await stepButton(2).click();
+  await sidepanel.waitForSelector(".dialog", { timeout: 8_000 });
+  assert(await sidepanel.isVisible("text=输入敏感变量"), "执行到敏感步骤时才索取敏感变量");
+  await sidepanel.locator("[data-testid=secrets-input], .dialog input[type=password]").first().fill("cloudpivot-demo-2026");
+  await sidepanel.getByText("提交并继续").click();
   await sidepanel.waitForTimeout(1_500);
   assert(await demoPage.locator("[data-showit-overlay] .showit-cover").count() >= 0, "密码填写完成（期间观众画面进入隐私保护）");
   const passwordFilled = await demoPage.evaluate(() => {
@@ -104,7 +113,7 @@ try {
   await demoPage.waitForSelector("[data-testid=market-search]", { timeout: 10_000 });
   assert(true, "登录完成并进入能力市场（条件验证通过）");
 
-  console.log("6) 自动续跑的搜索链");
+  console.log("5) 自动续跑的搜索链");
   await stepButton(5).click();
   await sidepanel.waitForTimeout(3_000);
   const searchValue = await demoPage.locator("[data-testid=market-search]").inputValue();
@@ -115,7 +124,7 @@ try {
   await demoPage.waitForSelector("[data-testid=market-detail]", { timeout: 10_000 });
   assert(true, "打开能力详情（条件验证通过）");
 
-  console.log("7) 高风险发布确认");
+  console.log("6) 高风险发布确认");
   for (let index = 0; index < 5; index += 1) {
     await navNext.click();
     await sidepanel.waitForTimeout(500);
@@ -132,7 +141,7 @@ try {
   await demoPage.waitForSelector("[data-testid=api-status-running]", { timeout: 10_000 });
   assert(true, "发布执行完成，生命周期变为运行中（条件验证通过）");
 
-  console.log("8) 审批与条件验证");
+  console.log("7) 审批与条件验证");
   await navNext.click();
   await navNext.click();
   await sidepanel.waitForTimeout(1_200);
@@ -142,7 +151,7 @@ try {
   await demoPage.waitForSelector("[data-testid=approval-status-approved]", { timeout: 10_000 });
   assert(true, "审批通过，状态机验证通过（待审批 → 已通过）");
 
-  console.log("9) 圈选标注与观众镜像");
+  console.log("8) 圈选标注与观众镜像");
   await sidepanel.locator(".panel-page__tools").getByTitle("圈选标注（C）").click();
   const demoBox = await demoPage.locator(".demo-content").boundingBox();
   assert(Boolean(demoBox), "演示页内容区域可定位");
@@ -168,7 +177,7 @@ try {
     await audiencePage.screenshot({ path: resolve(resultsDir, "demo-e2e-audience.png") });
   }
 
-  console.log("10) 离线备用");
+  console.log("9) 离线备用");
   const navPrev = sidepanel.locator(".panel-footer__nav").getByTitle("上一页");
   for (let index = 0; index < 7; index += 1) {
     await navPrev.click();
@@ -188,7 +197,7 @@ try {
   await sidepanel.locator(".panel-page__tools").getByTitle("返回业务页面").or(sidepanel.getByTitle("切换离线备用", { exact: true })).click();
   await sidepanel.waitForTimeout(1_000);
 
-  console.log("11) 结束演示");
+  console.log("10) 结束演示");
   await sidepanel.locator(".panel-footer__modes").getByText("结束").click();
   await sidepanel.waitForTimeout(2_500).catch(() => undefined);
   if (context.pages().some((page) => page.url().includes("/demo.html"))) {

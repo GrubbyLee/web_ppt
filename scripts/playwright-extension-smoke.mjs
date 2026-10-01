@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
+import { freshProfileDir } from "./e2e-profile.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const extensionDir = resolve(root, "apps/extension/.output/chrome-mv3");
@@ -41,7 +42,7 @@ const server = createServer((request, response) => {
 
 await new Promise((resolvePromise) => server.listen(fixturePort, "127.0.0.1", resolvePromise));
 
-const context = await chromium.launchPersistentContext(resolve(resultsDir, "extension-smoke-profile"), {
+const context = await chromium.launchPersistentContext(await freshProfileDir("extension-smoke-profile"), {
   headless: false,
   viewport: { width: 1280, height: 800 },
   args: [

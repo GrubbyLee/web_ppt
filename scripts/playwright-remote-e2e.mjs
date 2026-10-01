@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
+import { freshProfileDir } from "./e2e-profile.mjs";
 
 /**
  * Remote-audience E2E: extension + local relay + headless viewer browser.
@@ -43,7 +44,7 @@ const relayReady = new Promise((resolveReady, rejectReady) => {
   probe();
 });
 
-const presenter = await chromium.launchPersistentContext(resolve(resultsDir, "remote-e2e-presenter-profile"), {
+const presenter = await chromium.launchPersistentContext(await freshProfileDir("remote-e2e-presenter-profile"), {
   headless: false,
   viewport: { width: 1440, height: 900 },
   args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`, "--no-first-run"]
@@ -139,6 +140,18 @@ try {
   // 必须真的渲染出来：资源路径前缀错误会导致白屏，这条断言防止该回归.
   await demoTab.waitForSelector(".demo-app", { timeout: 10_000 });
   assert(true, "中继托管的演练控制台已渲染（资源可加载，非白屏）");
+  // 中继托管副本是 http 页，会被当作业务页注入连接器：登录关卡有密码框时，
+  // 观众画面必须进隐私封面、控制台显示未就绪（与本机内置演示、真实业务页一致）。
+  await sidepanel.waitForTimeout(1_500);
+  assert(await sidepanel.isVisible("text=画面未就绪"), "登录关卡期间观众画面受保护（控制台显示未就绪）");
+  // 敏感输入消失后必须自动恢复就绪，否则封面会一直挂着、自动翻页永久阻断.
+  await demoTab.evaluate(() => sessionStorage.setItem("showit-demo-session", JSON.stringify({
+    account: "demo@cloudpivot.cn", name: "演示账号", role: "访客", loggedInAt: Date.now()
+  })));
+  await demoTab.reload();
+  await demoTab.waitForSelector(".demo-app", { timeout: 10_000 }).catch(() => undefined);
+  await sidepanel.waitForTimeout(3_000);
+  assert(!await sidepanel.isVisible("text=画面未就绪"), "登录完成后中继托管的演示页恢复就绪（隐私封面自动解除）");
 
   console.log("5) 结束演示清理远程房间");
   await sidepanel.locator(".dialog .dialog__actions").last().getByText("关闭").click().catch(async () => {
