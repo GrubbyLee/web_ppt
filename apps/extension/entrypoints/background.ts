@@ -45,6 +45,14 @@ let machine: MachineState | null = null;
 const runtime = {
   sessionWindowId: null as number | null,
   sessionTabId: null as number | null,
+  /** Presenter window: the window hosting the side panel console. The session
+   *  tab is created here so console clicks never push the stage into a
+   *  background window (see openSessionWindow). */
+  presenterWindowId: null as number | null,
+  /** True when the session owns a whole window (dedicated/incognito) that must
+   *  be closed on exit; false when it only added a tab to the presenter
+   *  window, which must survive the session. */
+  sessionOwnsWindow: false,
   tabKind: null as "business" | "stage" | "demo" | null,
   tabStatus: null as "loading" | "complete" | "error" | null,
   tabUnsafeOrigin: false,
@@ -190,6 +198,17 @@ function targetUrlForPage(page: PresentationPage | null): string {
   return fallback?.ok ? fallback.value : stageUrl();
 }
 
+/** True when the built-in demo console is served by the relay instead of the
+ *  extension page. That copy is an http(s) page, so it IS capturable (unlike
+ *  chrome-extension://) — which is what lets remote viewers watch the built-in
+ *  sample. It is classified "business" (see sessionTabKind) and behaves like a
+ *  business tab: readiness comes from the injected connector, not from the
+ *  showit:demo port, which it cannot open. */
+function isRelayHostedDemoUrl(url: string): boolean {
+  if (!remoteRoom || !relayBase) return false;
+  return url.startsWith(`${relayBaseForRoom()}/demo/`);
+}
+
 function businessReady(): boolean {
   if (!machine) return false;
   const page = currentPage();
@@ -197,6 +216,12 @@ function businessReady(): boolean {
   if (offlineActive()) return isOfflineFallbackReady(page.offline);
   if (page.pageType === "fixed" || page.pageType === "end" || !page.url) return true;
   if (page.url.startsWith("demo://")) {
+    // The relay-hosted copy is a plain http page: readiness follows the
+    // injected connector (loaded + not blocked) instead of the port report,
+    // otherwise "画面未就绪" sticks forever and auto-advance stays blocked.
+    if (isRelayHostedDemoUrl(targetUrlForPage(page))) {
+      return runtime.tabStatus === "complete" && (runtime.connectorState?.state ?? "ready") === "ready";
+    }
     // The demo page reports ready/anonymous over its port; null means loading.
     return runtime.tabKind === "demo" && runtime.tabStatus === "complete" && runtime.connectorState?.state === "ready";
   }
@@ -576,7 +601,35 @@ function scheduleBoundMaskResolve(): void {
 
 // ---- session tab lifecycle ------------------------------------------------------
 
-async function openSessionWindow(targetUrl: string): Promise<void> {
+/** The window the presenter is actually looking at: remembered from the
+ *  launch gesture, falling back to the last focused window (e.g. when the
+ *  console asks to restore a closed stage tab). */
+async function resolvePresenterWindowId(): Promise<number | null> {
+  if (runtime.presenterWindowId !== null) {
+    const existing = await browser.windows.get(runtime.presenterWindowId).catch(() => null);
+    if (existing?.id !== undefined) return existing.id;
+  }
+  const fallback = await browser.windows.getLastFocused().catch(() => null);
+  return fallback?.id ?? null;
+}
+
+/** Keep the console docked next to the stage. Best effort: Chrome can require
+ *  a user gesture, and the panel is already open in the presenter window. */
+function revealConsoleFor(tabId: number | undefined): void {
+  if (tabId === undefined) return;
+  void browser.sidePanel.open({ tabId }).catch(() => undefined);
+}
+
+/** Open the session surface (business page / stage / demo console).
+ *
+ *  The stage tab is created **inside the presenter window** — the window that
+ *  hosts the side panel console — rather than in a window of its own. A
+ *  separate window makes every console interaction (laser pointer, circle,
+ *  screen modes, step advance) steal focus from the stage: the business page
+ *  drops to another window and the presenter loses sight of it mid-talk.
+ *  Only a dedicated (incognito) session still needs its own window, because an
+ *  incognito profile cannot share the presenter's normal window. */
+async function openSessionWindow(targetUrl: string, hostWindowId?: number | null): Promise<void> {
   const dedicated = machine?.session.browserSessionMode === "dedicated";
   let incognito = false;
   if (dedicated) {
@@ -587,13 +640,36 @@ async function openSessionWindow(targetUrl: string): Promise<void> {
     }
     if (dedicated && !incognito) runtime.message = "专用演示环境需要在浏览器扩展设置中允许 Showit 进入无痕窗口，已使用普通窗口。";
   }
+  const kind = targetUrl === stageUrl() ? "stage" : targetUrl.includes("/demo.html") ? "demo" : "business";
+  const windowId = incognito ? null : hostWindowId ?? await resolvePresenterWindowId();
+  if (windowId !== null) {
+    const tab = await browser.tabs.create({ url: targetUrl, windowId, active: true }).catch((error) => {
+      recordDiagnostic("打开演示标签", error);
+      return null;
+    });
+    if (tab?.id !== undefined) {
+      runtime.presenterWindowId = windowId;
+      runtime.sessionWindowId = windowId;
+      runtime.sessionOwnsWindow = false;
+      runtime.sessionTabId = tab.id;
+      runtime.tabKind = kind;
+      runtime.tabStatus = "loading";
+      runtime.tabUnsafeOrigin = false;
+      revealConsoleFor(tab.id);
+      return;
+    }
+    // The presenter window vanished between launch and here — fall through and
+    // open a window of our own instead of leaving the session without a stage.
+  }
   const created = await browser.windows.create({ url: targetUrl, focused: true, width: 1280, height: 832, incognito });
   runtime.sessionWindowId = created?.id ?? null;
+  runtime.sessionOwnsWindow = true;
   const tab = created?.tabs?.[0];
   runtime.sessionTabId = tab?.id ?? null;
-  runtime.tabKind = targetUrl === stageUrl() ? "stage" : "business";
+  runtime.tabKind = kind;
   runtime.tabStatus = "loading";
   runtime.tabUnsafeOrigin = false;
+  revealConsoleFor(tab?.id);
 }
 
 let navigationToken = 0;
@@ -1183,7 +1259,9 @@ export default defineBackground(() => {
     runtime.offlineOriginRequest = null;
     runtime.message = null;
     await applyProtectionRules();
-    await openSessionWindow(targetUrlForPage(currentPage()));
+    // The launcher (workbench/editor tab) lives in the window that just opened
+    // the side panel — that is the presenter window the stage belongs to.
+    await openSessionWindow(targetUrlForPage(currentPage()), port?.sender?.tab?.windowId ?? null);
     broadcastState();
   }
 
@@ -1231,7 +1309,10 @@ export default defineBackground(() => {
     clearRuntimeSecrets(runtimeSession.id);
     await kvSessionRemove(MACHINE_SNAPSHOT_KEY);
     const windowId = runtime.sessionWindowId;
+    const ownsWindow = runtime.sessionOwnsWindow;
+    const closingTabId = runtime.sessionTabId;
     runtime.sessionWindowId = null;
+    runtime.sessionOwnsWindow = false;
     runtime.sessionTabId = null;
     runtime.tabKind = null;
     runtime.tabStatus = null;
@@ -1240,7 +1321,11 @@ export default defineBackground(() => {
     runtime.offlineOriginRequest = null;
     runtime.message = null;
     demoMutations = [];
-    if (windowId !== null) await browser.windows.remove(windowId).catch(() => undefined);
+    // A dedicated (incognito) run owns its window. A daily run only owns the
+    // tab it added to the presenter window — that window holds the console
+    // (and usually the workbench) and must survive the session.
+    if (ownsWindow && windowId !== null) await browser.windows.remove(windowId).catch(() => undefined);
+    else if (closingTabId !== null) await browser.tabs.remove(closingTabId).catch(() => undefined);
     try {
       await mergePresenterEditsIntoWorkspace(runtimeProject, presenterEdits);
       const stored = await loadWorkspace(runtimeProject.id);
