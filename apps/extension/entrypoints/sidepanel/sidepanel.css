@@ -380,18 +380,6 @@
   border-radius: 999px;
 }
 
-.panel-footer__nav,
-.panel-footer__modes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.panel-footer__modes {
-  border-top: 1px dashed var(--line-700);
-  padding-top: 7px;
-}
-
 .panel-footer__progress {
   display: flex;
   align-items: center;
@@ -624,4 +612,51 @@
   margin-top: 2px;
   padding-top: 8px;
   border-top: 1px solid var(--line-700);
+}
+
+/* ---- 三级视觉层级：演讲中 90% 的动作是翻页，它必须最显眼 ---- */
+
+.panel-group--pages .toolbar-button,
+.panel-page-jump {
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.panel-steps__nav .toolbar-button,
+.panel-group--timer .toolbar-button {
+  min-height: 38px;
+  font-size: 13px;
+}
+
+.panel-group__actions--sub {
+  padding-top: 6px;
+  border-top: 1px dashed var(--line-700);
+}
+
+.panel-group--end {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-700);
+}
+
+.panel-group--end .toolbar-button--danger {
+  grid-column: 1 / -1;
+}
+
+/* 讲稿是阅读材料，视觉层级必须低于所有控件 */
+.panel-notes .markdown-view {
+  font-size: 12.5px;
+}
+
+.panel-notes .markdown-view :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0.7em 0 0.3em;
+  color: var(--muted-300);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.panel-notes__head .toolbar-button {
+  min-height: 28px;
+  padding: 3px 7px;
+  font-size: 11.5px;
 }

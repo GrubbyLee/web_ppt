@@ -10,6 +10,11 @@ import { ToolbarButton } from "@/components/ToolbarButton";
 import type { WorkbenchPort } from "./App";
 import { Archive, ChevronLeft, ChevronRight, Copy, Download, FileDown, FileUp, FolderOpen, Play, Plus, ShieldOff, TriangleAlert, Trash2 } from "lucide-react";
 
+export type LibraryToolbarApi = {
+  requestImport: () => void;
+  requestCreate: () => void;
+};
+
 /** Projects per page. The library also renders inside the side panel console,
  *  where an endlessly scrolling column would be unusable. */
 const LIBRARY_PAGE_SIZE = 6;
@@ -45,7 +50,16 @@ async function originPatternsForProject(project: Project): Promise<string[]> {
 /** Renders the project library. `embedded` means "inside the side panel
  *  console": no own top bar (the console owns the chrome) and 编辑项目 opens a
  *  real tab, because the full editor cannot live in the panel. */
-export function Library({ port, embedded = false }: { port: WorkbenchPort; embedded?: boolean }) {
+export function Library({
+  port,
+  embedded = false,
+  registerToolbar
+}: {
+  port: WorkbenchPort;
+  embedded?: boolean;
+  /** 嵌入侧边栏时，把「导入 / 新建项目」交给宿主页头，避免渲染两条工具条。 */
+  registerToolbar?: (api: LibraryToolbarApi | null) => void;
+}) {
   const importInput = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<LibraryState>("loading");
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -62,6 +76,15 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
   const [importReview, setImportReview] = useState<ProjectImportReview | null>(null);
   const [pendingRun, setPendingRun] = useState<Workspace | null>(null);
   const [launching, setLaunching] = useState(false);
+
+  useEffect(() => {
+    if (!embedded || !registerToolbar) return;
+    registerToolbar({
+      requestImport: () => importInput.current?.click(),
+      requestCreate: () => setCreating(true)
+    });
+    return () => registerToolbar(null);
+  }, [embedded, registerToolbar]);
 
   useEffect(() => {
     void (async () => {
@@ -252,6 +275,9 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
 
   return (
     <main className="project-workspace">
+      {/* 嵌入侧边栏时不再渲染自己的页头：宿主页头已承载品牌与「导入 / 新建项目」，
+          嵌套两层页头会让「Showit」出现两次、工具条上下堆叠。 */}
+      {embedded ? null : (
       <header className="workspace-topbar">
         <div>
           <strong>Showit</strong>
@@ -263,11 +289,18 @@ export function Library({ port, embedded = false }: { port: WorkbenchPort; embed
           <input ref={importInput} className="visually-hidden" type="file" accept=".showit,.json,application/json" onChange={(event) => void importProject(event.target.files?.[0])} />
         </section>
       </header>
+      )}
+
+      {/* 文件选择与新建表单始终挂载：宿主页头的按钮要靠它们工作。 */}
+      {embedded ? (
+        <input ref={importInput} className="visually-hidden" type="file" accept=".showit,.json,application/json" onChange={(event) => void importProject(event.target.files?.[0])} />
+      ) : null}
 
       <section className="workspace-body" aria-label="演示项目列表">
         <div className="workspace-heading">
           <div>
-            <p>项目库</p>
+            {/* 嵌入侧边栏时宿主页头已经写了「项目库」，这里只留项目数量。 */}
+            {embedded ? null : <p>项目库</p>}
             <h1>{workspaces.length} 个本地项目</h1>
           </div>
           {message ? <output className="workspace-message">{message}</output> : null}

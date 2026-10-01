@@ -13,14 +13,17 @@ import { resolveTemplate } from "@/lib/template";
 import { runProjectPreflight } from "@/lib/preflight";
 import { downloadMarkdownScript } from "@/lib/export";
 import { downloadDiagnostics, listDiagnostics } from "@/lib/diagnostics";
-import { Library } from "../workbench/Library";
+import { Library, type LibraryToolbarApi } from "../workbench/Library";
 import type { WorkbenchPort } from "../workbench/App";
 import {
   CircleDot,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Eraser,
   FileText,
+  FileUp,
   FlaskConical,
   Globe,
   FolderTree,
@@ -32,6 +35,7 @@ import {
   Power,
   Repeat,
   RotateCcw,
+  Plus,
   Settings,
   Snowflake,
   Square,
@@ -57,6 +61,7 @@ export function App() {
   /** 项目库：演示开始前用于选项目/编辑项目，演示开始后自动隐藏，
    *  左侧完全交给业务系统画面；可随时用控制台按钮呼出。 */
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   // 按会话判定，而不是一次性标记：演示中再次运行另一个项目时也要重新隐藏项目库。
   const libraryAutoClosedRef = useRef<string | null>(null);
   const [relayBase, setRelayBase] = useState("");
@@ -146,6 +151,10 @@ export function App() {
 
   const act = useCallback((action: SessionAction) => send({ type: "action", action }), [send]);
   const libraryPort = useMemo<WorkbenchPort>(() => ({ send }), [send]);
+  const toolbarApiRef = useRef<LibraryToolbarApi | null>(null);
+  const registerToolbar = useCallback((api: LibraryToolbarApi | null) => {
+    toolbarApiRef.current = api;
+  }, []);
 
   useEffect(() => {
     // Starting a presentation hands the whole window to the business system.
@@ -288,16 +297,19 @@ export function App() {
 
   // ---- landing -----------------------------------------------------------------
 
+  // 没有演示运行时，控制台本身就是项目库（这是演讲者看到的第一个界面）。
   if (!machine || !session || !project || !page || !meta || libraryOpen) {
     return (
       <main className="panel panel--landing panel--library">
         <header className="panel-brand">
           <strong>Showit</strong>
-          <span className="panel-brand__project">{libraryOpen ? "项目库" : "演讲者控制台"}</span>
-          {libraryOpen ? <ToolbarButton icon="✕" label="返回控制台" onClick={() => setLibraryOpen(false)} /> : null}
+          <span className="panel-brand__project">项目库</span>
+          <ToolbarButton icon={<FileUp size={16} />} label="导入" title="导入 .showit 项目文件" onClick={() => toolbarApiRef.current?.requestImport()} />
+          <ToolbarButton icon={<Plus size={16} />} label="新建" title="新建演示项目" onClick={() => toolbarApiRef.current?.requestCreate()} />
+          {machine ? <ToolbarButton icon="✕" label="返回控制台" onClick={() => setLibraryOpen(false)} /> : null}
         </header>
         <div className="panel-library">
-          <Library port={libraryPort} embedded />
+          <Library port={libraryPort} embedded registerToolbar={registerToolbar} />
         </div>
         {!libraryOpen ? (
           <section className="landing">
@@ -401,12 +413,12 @@ export function App() {
           <div className="panel-notes__head">
             <span>讲稿</span>
             <div>
-              <ToolbarButton icon={<FileText size={13} />} title={notesEditing ? "预览讲稿" : "编辑讲稿"} active={notesEditing} onClick={() => {
+              <ToolbarButton icon={<FileText size={13} />} label={notesEditing ? "预览" : "编辑"} title={notesEditing ? "预览讲稿" : "编辑讲稿"} active={notesEditing} onClick={() => {
                 if (notesEditing && notesDraft !== null) act({ type: "update-script", markdown: notesDraft });
                 setNotesEditing(!notesEditing);
                 setNotesDraft(null);
               }} />
-              <ToolbarButton icon={<FileText size={13} />} title="导出本页讲稿" onClick={() => downloadMarkdownScript(project, page.id)} />
+              <ToolbarButton icon={<FileText size={13} />} label="导出" title="导出本页讲稿" onClick={() => downloadMarkdownScript(project, page.id)} />
               <ToolbarButton icon="A+" title="放大讲稿字号" onClick={() => act({ type: "set-note-font-scale", fontScale: project.layout.noteFontScale + 0.05 })} />
               <ToolbarButton icon="A-" title="缩小讲稿字号" onClick={() => act({ type: "set-note-font-scale", fontScale: project.layout.noteFontScale - 0.05 })} />
             </div>
@@ -453,7 +465,7 @@ export function App() {
                 <option key={item.id} value={index}>{`${index + 1}/${project.pages.length} ${item.title}`}</option>
               ))}
             </select>
-            <ToolbarButton icon={<ChevronRight size={16} />} label="下一页" title="下一页（→）" onClick={() => act({ type: "set-active-page", index: session.currentPageIndex + 1 })} />
+            <ToolbarButton icon={<ChevronRight size={16} />} label="下一页" title="下一页（→）" variant="primary" onClick={() => act({ type: "set-active-page", index: session.currentPageIndex + 1 })} />
           </div>
         </section>
 
@@ -471,48 +483,47 @@ export function App() {
                 setDialog("rehearsal-note");
               }
             }} />
-            <ToolbarButton icon={<Repeat size={16} />} label={project.autoAdvanceEnabled ? "自动翻页 开" : "自动翻页 关"} title="自动翻页（A）" active={project.autoAdvanceEnabled} onClick={() => act({ type: "set-auto-advance", enabled: !project.autoAdvanceEnabled })} />
+            <ToolbarButton icon={<Repeat size={16} />} label={project.autoAdvanceEnabled ? "自动翻页：开" : "自动翻页：关"} title="自动翻页（A）" active={project.autoAdvanceEnabled} onClick={() => act({ type: "set-auto-advance", enabled: !project.autoAdvanceEnabled })} />
           </div>
         </section>
-        <section className="panel-group panel-group--screen">
-          <span className="panel-group__title">屏幕画面</span>
-          <div className="panel-group__actions">
-            <ToolbarButton icon={<Moon size={16} />} label="黑屏" title="黑屏（B）" active={session.screenMode === "black"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "black" ? "normal" : "black" })} />
-            <ToolbarButton icon={<Sun size={16} />} label="白屏" title="白屏（W）" active={session.screenMode === "white"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "white" ? "normal" : "white" })} />
-            <ToolbarButton icon={<Snowflake size={16} />} label="冻结" title="冻结画面（F）" active={session.screenMode === "frozen"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "frozen" ? "normal" : "frozen" })} />
-            <ToolbarButton icon={<TriangleAlert size={16} />} label="隐私" title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
-          </div>
-        </section>
-
         <section className="panel-group panel-group--deliver">
-          <span className="panel-group__title">投送与观众</span>
+          <span className="panel-group__title">画面与投送</span>
           <div className="panel-group__actions">
+            <ToolbarButton icon={<TriangleAlert size={16} />} label="隐私遮挡" title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
             <ToolbarButton icon={<MonitorPlay size={16} />} label="共享画面" title="共享画面：打开只读画面窗口，用于视频会议共享或第二显示器预览（观众不看本机）" onClick={() => send({ type: "open-audience" })} />
-            <ToolbarButton
-              icon={<Globe size={16} />}
-              label={meta.remote ? `远程 ${meta.remote.viewerCount}` : "远程观众"}
-              title={meta.remote ? "管理远程观众（链接/批准/结束）" : "通过中继开启局域网/公网观众"}
-              active={Boolean(meta.remote)}
-              onClick={() => {
-                if (meta.remote) {
-                  setDialog("relay");
-                  return;
-                }
-                if (!relayBase.trim()) {
-                  setDialog("relay");
-                  return;
-                }
-                send({ type: "open-remote-audience", relayBase: relayBase.trim() });
-              }}
-            />
-            {meta.viewerCount >= 0 && machine.localAudience && !meta.captureActive ? <ToolbarButton icon={<MonitorPlay size={16} />} label="授权捕获" title="捕获需要页面手势授权（右键菜单或 Ctrl+Shift+9）；此按钮在授权后重试" onClick={() => send({ type: "authorize-capture" })} /> : null}
+            <ToolbarButton icon={moreOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />} label={moreOpen ? "收起" : "更多"} title="更多画面控制与投送方式" active={moreOpen} onClick={() => setMoreOpen(!moreOpen)} />
           </div>
+          {moreOpen ? (
+            <div className="panel-group__actions panel-group__actions--sub">
+              <ToolbarButton icon={<Moon size={16} />} label="黑屏" title="黑屏（B）" active={session.screenMode === "black"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "black" ? "normal" : "black" })} />
+              <ToolbarButton icon={<Sun size={16} />} label="白屏" title="白屏（W）" active={session.screenMode === "white"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "white" ? "normal" : "white" })} />
+              <ToolbarButton icon={<Snowflake size={16} />} label="冻结" title="冻结画面（F）" active={session.screenMode === "frozen"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "frozen" ? "normal" : "frozen" })} />
+              <ToolbarButton
+                icon={<Globe size={16} />}
+                label={meta.remote ? `远程 ${meta.remote.viewerCount}` : "远程观众"}
+                title={meta.remote ? "管理远程观众（链接/批准/结束）" : "通过中继开启局域网/公网观众"}
+                active={Boolean(meta.remote)}
+                onClick={() => {
+                  if (meta.remote) {
+                    setDialog("relay");
+                    return;
+                  }
+                  if (!relayBase.trim()) {
+                    setDialog("relay");
+                    return;
+                  }
+                  send({ type: "open-remote-audience", relayBase: relayBase.trim() });
+                }}
+              />
+              {meta.viewerCount >= 0 && machine.localAudience && !meta.captureActive ? <ToolbarButton icon={<MonitorPlay size={16} />} label="授权捕获" title="捕获需要页面手势授权（右键菜单或 Ctrl+Shift+9）；此按钮在授权后重试" onClick={() => send({ type: "authorize-capture" })} /> : null}
+              <ToolbarButton icon="⛶" label="全屏控制台" title="在标签页中打开控制台，占满整个屏幕" onClick={() => send({ type: "open-console-tab" })} />
+            </div>
+          ) : null}
         </section>
 
         <section className="panel-group panel-group--end">
           <div className="panel-group__actions">
             <ToolbarButton icon={<Settings size={16} />} label="设置" title="项目设置、逐页健康检查与诊断" onClick={() => setDialog("settings")} />
-            <ToolbarButton icon="⛶" label="全屏控制台" title="在标签页中打开控制台，占满整个屏幕" onClick={() => send({ type: "open-console-tab" })} />
             <ToolbarButton icon={<Power size={16} />} label="结束演示" variant="danger" onClick={() => send({ type: "end-session" })} />
           </div>
         </section>
