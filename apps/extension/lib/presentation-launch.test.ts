@@ -105,4 +105,19 @@ describe("presentation launch snapshot", () => {
     expect(applied.session.pageElapsedMs).toBe(0);
     expect(applied.session.sectionElapsedMs).toBe(0);
   });
+
+  it("reopens on a live picture instead of the 演示结束 cover", () => {
+    // Ending a run persists screenMode "ended"; the next run must not inherit it.
+    const finished = createSession(sampleProject);
+    finished.screenMode = "ended";
+    finished.audienceStatus = "synced";
+    finished.audienceCount = 3;
+    finished.currentPageIndex = 2;
+    const launch = beginPresentationLaunch(sampleProject, finished);
+    expect(launch.session.screenMode).toBe("normal");
+    expect(launch.session.audienceStatus).toBe("disconnected");
+    expect(launch.session.audienceCount).toBe(0);
+    // Progress is still resumed.
+    expect(launch.session.currentPageIndex).toBe(2);
+  });
 });

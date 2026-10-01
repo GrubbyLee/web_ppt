@@ -35,6 +35,12 @@ function runtimeSession(sourceProject: Project, project: Project, sourceSession:
 
   return {
     ...sourceSession,
+    // A run always opens on a live picture. Ending a presentation persists
+    // screenMode "ended" into the stored session, so it must be reset here —
+    // otherwise the next run starts on the 演示结束 cover.
+    screenMode: "normal",
+    audienceStatus: "disconnected",
+    audienceCount: 0,
     currentPageIndex,
     pageElapsedMs: stayedOnPage ? sourceSession.pageElapsedMs : 0,
     sectionElapsedMs: stayedInSection ? sourceSession.sectionElapsedMs : 0,
