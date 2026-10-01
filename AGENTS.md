@@ -48,10 +48,11 @@ npm run release:extension        # 可复现 ZIP + SHA-256
 - **MV3 的硬限制**：`chrome-extension://` 页不能被 `executeScript` 注入，也**不能被 tabCapture 捕获**。因此内置演练控制台自己实现同一套连接器协议（`demo/main.tsx`），DOM 逻辑与注入脚本共用 `lib/dom-connector.ts`；远程观众要看内置示例时，会话标签会切到**中继托管的 HTTP 副本**（`apps/demo-site` 的产物）。
   - 该副本是普通 http 页，被分类为 `business`（`startCapture` 只捕获 business 标签，这是它能被远程看到的**前提**，不要改成 `demo`）。
   - 代价是 `businessReady()` 里 `demo://` 的判定（要求 `tabKind === "demo"`）对它永远为假，所以有 `isRelayHostedDemoUrl()` 分支：按注入连接器的状态判定就绪，登录关卡照旧阻断、登录后自动恢复。
-- **演示画面内嵌在工作台页面里**（`workbench/App.tsx` 的 `stage-viewport`）：`demo://` 页用 `DemoConsole mode="mirror"` 就地镜像，真实业务页用 `previewUrl` 的 iframe，章节/固定页就地渲染。演讲者从头到尾只看这一个页面，因此点击任何控制台控件都不会让画面失焦。
-  - 后台**仍然**有一个真实的会话标签（`runtime.sessionTabId`），它负责注入连接器、执行步骤、承载 overlay 和被 tabCapture 捕获；该标签以 `active: false` **后台运行**，绝不抢焦点、不新开窗口。观众看到的始终是它，不是工作台里那个 iframe。
-  - 因为该标签在后台，`tabCapture` 的授权手势（右键菜单 / Ctrl+Shift+9）拿不到它的 activeTab：`authorizeCapture()` 会临时聚焦它取流，再还原演示者原来的标签。改这块时要保住这个来回。
-  - 项目库是弹窗（`workbench-library__panel`，带 scrim、`role=dialog`），顶部按钮与「导入」「新建项目」并列；列表按 `LIBRARY_PAGE_SIZE` 分页，腾出的主区域就是内嵌画面。
+- **业务系统永远作为真实标签运行，不要嵌入**（不要 iframe 到工作台/控制台里）：左侧是业务系统标签，右侧是侧边栏控制台，两者在**同一个窗口**。
+  - 为什么不能内嵌：iframe 会造出业务系统的**第二个实例**（会话/登录态不一致、写操作可能重复生效）；大量站点用 `X-Frame-Options` / `CSP frame-ancestors` 拒绝被框；SSO 跳转、`window.open`、文件选择在 iframe 里会失效。
+  - 为什么不另开窗口：另开窗口后，演讲者每次点击控制台都会把业务页推到另一个窗口后面并失焦。同一窗口的侧边栏只移动键盘焦点，画面始终可见。
+  - 会话标签（`runtime.sessionTabId`）以 `active: true` 创建在演示者窗口内，它承载连接器注入、步骤执行、overlay 与 tabCapture；观众看到的始终是它。
+- **项目库嵌在侧边栏控制台里**（`sidepanel/App.tsx` 的 `panel-library`，`Library` 组件 `embedded` 模式）：演示开始前用它看项目数量、选项目、编辑项目（编辑会开 `workbench.html#/p/<id>` 标签页）；演示开始后自动隐藏，可随时用控制台的「项目库」按钮呼出。列表按 `LIBRARY_PAGE_SIZE` 分页，因为侧边栏放不下无限长列。
 
 ## 编码约定
 

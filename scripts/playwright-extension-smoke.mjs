@@ -79,8 +79,12 @@ try {
   await sidepanel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await sidepanel.waitForSelector(".panel-brand", { timeout: 5_000 });
   assert((await sidepanel.textContent(".panel-brand strong")) === "Showit", "侧边栏标题为 Showit");
-  await sidepanel.waitForSelector("text=打开工作台", { timeout: 5_000 });
-  assert(await sidepanel.isVisible("text=当前没有正在运行的演示。"), "无会话时显示落地状态");
+  // 项目库内嵌在侧边栏：演示开始前在这里看项目数量、选项目、编辑项目。
+  await sidepanel.waitForSelector(".panel-library", { timeout: 5_000 });
+  await sidepanel.waitForSelector("text=个本地项目", { timeout: 10_000 });
+  assert(await sidepanel.isVisible("text=云枢 · 五角色能力治理闭环"), "侧边栏内嵌项目库列出内置示例");
+  await sidepanel.waitForSelector("text=在标签页中打开工作台", { timeout: 5_000 });
+  assert(await sidepanel.isVisible("text=演讲者控制台"), "无会话时侧边栏是项目库 / 落地状态");
   const overflow = await sidepanel.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert(overflow <= 0, "侧边栏无水平溢出");
   await sidepanel.screenshot({ path: resolve(resultsDir, "extension-sidepanel.png") });

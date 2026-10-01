@@ -98,11 +98,6 @@ try {
   await workbench.evaluate(() => {
     window.chrome.permissions.request = async () => true;
   });
-  // 项目库是弹窗：未展开时先点「项目库」再运行。
-  if ((await workbench.locator(".workbench-library--open").count()) === 0) {
-    await workbench.getByTitle("打开本地项目库：选择或编辑演示项目").click();
-    await workbench.waitForTimeout(600);
-  }
   await workbench.getByTitle("启动演示运行时").click();
   const trustDialog = workbench.getByRole("dialog", { name: "项目需要信任" });
   await trustDialog.waitFor({ state: "visible", timeout: 5_000 })
@@ -224,8 +219,8 @@ try {
   assert(audienceGone, "观众窗口已随演示结束关闭");
   const sidepanelAfter = await context.newPage();
   await sidepanelAfter.goto(`chrome-extension://${extensionId}/sidepanel.html`);
-  await sidepanelAfter.waitForSelector("text=当前没有正在运行的演示", { timeout: 8_000 });
-  assert(true, "结束后侧边栏回到落地状态");
+  await sidepanelAfter.waitForSelector(".panel-library", { timeout: 8_000 });
+  assert(true, "结束后侧边栏回到项目库 / 落地状态");
   const snapshotGone = await serviceWorker.evaluate(async () => (await chrome.storage.session.get("showit:machine-snapshot:v1"))["showit:machine-snapshot:v1"] === undefined);
   assert(snapshotGone, "运行快照已清除");
 

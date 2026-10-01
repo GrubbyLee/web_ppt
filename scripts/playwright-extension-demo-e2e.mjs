@@ -43,11 +43,6 @@ try {
   await workbench.evaluate(() => {
     window.chrome.permissions.request = async () => true;
   });
-  // 项目库是弹窗：未展开时先点「项目库」再运行。
-  if ((await workbench.locator(".workbench-library--open").count()) === 0) {
-    await workbench.getByTitle("打开本地项目库：选择或编辑演示项目").click();
-    await workbench.waitForTimeout(600);
-  }
   await workbench.getByTitle("启动演示运行时").click();
   const trustDialog = workbench.getByRole("dialog", { name: "项目需要信任" });
   await trustDialog.waitFor({ state: "visible", timeout: 5_000 })
@@ -63,15 +58,20 @@ try {
   assert(await sidepanel.isVisible("text=1/18"), "侧边栏显示第 1/18 页");
   const stagePage = context.pages().find((page) => page.url().includes("/stage.html"));
   assert(Boolean(stagePage), "章节页以舞台幻灯片呈现");
-  // 演示画面必须内嵌在工作台页面里：演讲者不该为了看画面而切到另一个标签/窗口，
-  // 否则每次点击控制台（激光笔 / 圈选 / 翻页 / 屏幕模式）都会让那个独立页面失焦。
-  const embedded = await workbench.locator(".stage-viewport .stage-mirror, .stage-viewport .stage-frame").count();
-  assert(embedded > 0, "演示画面直接内嵌在工作台（演讲者无需另开标签或窗口）");
-  const focus = await serviceWorker.evaluate(async () => {
+  // 左业务系统 / 右控制台：画面标签必须与控制台同处一个窗口且保持活动，
+  // 否则每次点击控制台（激光笔 / 圈选 / 翻页 / 屏幕模式）都会把画面推到另一个窗口后面。
+  const layout = await serviceWorker.evaluate(async () => {
     const tabs = await chrome.tabs.query({});
-    return tabs.filter((tab) => (tab.url ?? "").includes("/stage.html")).map((tab) => tab.active);
+    const find = (fragment) => tabs.find((tab) => (tab.url ?? "").includes(fragment));
+    return {
+      workbench: find("/workbench.html")?.windowId ?? null,
+      stage: find("/stage.html")?.windowId ?? null,
+      windows: (await chrome.windows.getAll({})).length
+    };
   });
-  assert(focus.length > 0 && focus.every((active) => active === false), "会话画面标签在后台运行，不抢占演示者焦点");
+  assert(layout.stage !== null && layout.stage === layout.workbench,
+    `演示画面与控制台同处一个窗口（窗口 ${layout.stage}），画面不会被推到后台`);
+  assert(layout.windows === 1, `演示画面不再另开窗口（窗口数 ${layout.windows}）：左侧业务系统、右侧侧边栏控制台`);
   if (stagePage) {
     await stagePage.waitForSelector(".stage-slide h1", { timeout: 5_000 });
     const title = await stagePage.textContent(".stage-slide h1");
@@ -217,8 +217,8 @@ try {
   assert(!context.pages().some((page) => page.url().includes("/audience.html")), "观众窗口已关闭");
   const after = await context.newPage();
   await after.goto(`chrome-extension://${extensionId}/sidepanel.html`);
-  await after.waitForSelector("text=当前没有正在运行的演示", { timeout: 8_000 });
-  assert(true, "结束后侧边栏回到落地状态");
+  await after.waitForSelector(".panel-library", { timeout: 8_000 });
+  assert(await after.isVisible("text=云枢 · 五角色能力治理闭环"), "结束后侧边栏回到项目库 / 落地状态");
 
   await demoPage?.screenshot({ path: resolve(resultsDir, "demo-e2e-final.png") }).catch(() => undefined);
   console.log("内置示例端到端全产品验证通过。");
