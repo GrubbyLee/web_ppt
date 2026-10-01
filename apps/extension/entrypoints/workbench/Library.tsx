@@ -8,7 +8,11 @@ import { recordDiagnostic } from "@/lib/diagnostics";
 import { beginPresentationLaunch } from "@/lib/presentation-launch";
 import { ToolbarButton } from "@/components/ToolbarButton";
 import type { WorkbenchPort } from "./App";
-import { Archive, Copy, Download, FileDown, FileUp, FolderOpen, Play, Plus, ShieldOff, TriangleAlert, Trash2 } from "lucide-react";
+import { Archive, ChevronLeft, ChevronRight, Copy, Download, FileDown, FileUp, FolderOpen, Play, Plus, ShieldOff, TriangleAlert, Trash2 } from "lucide-react";
+
+/** Projects per page. The library also renders inside the side panel console,
+ *  where an endlessly scrolling column would be unusable. */
+const LIBRARY_PAGE_SIZE = 6;
 
 type LibraryState = "loading" | "ready" | "error";
 type PackageDialog = { mode: "export"; project: Project } | { mode: "import"; content: ArrayBuffer };
@@ -38,7 +42,10 @@ async function originPatternsForProject(project: Project): Promise<string[]> {
   return [...origins].filter((origin) => origin.startsWith("https:") || origin.startsWith("http:")).map((origin) => `${origin}/*`);
 }
 
-export function Library({ port }: { port: WorkbenchPort }) {
+/** Renders the project library. `embedded` means "inside the side panel
+ *  console": no own top bar (the console owns the chrome) and 编辑项目 opens a
+ *  real tab, because the full editor cannot live in the panel. */
+export function Library({ port, embedded = false }: { port: WorkbenchPort; embedded?: boolean }) {
   const importInput = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<LibraryState>("loading");
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -46,6 +53,7 @@ export function Library({ port }: { port: WorkbenchPort }) {
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [packageDialog, setPackageDialog] = useState<PackageDialog | null>(null);
+  const [listPage, setListPage] = useState(0);
   const [packagePassword, setPackagePassword] = useState("");
   const [packagePasswordConfirm, setPackagePasswordConfirm] = useState("");
   const [packageError, setPackageError] = useState<string | null>(null);
@@ -135,6 +143,13 @@ export function Library({ port }: { port: WorkbenchPort }) {
     await trustProject(project);
     setName("");
     setCreating(false);
+    // In the side panel there is no route to navigate: hand the editor to a tab.
+    if (embedded) {
+      void browser.tabs.create({ url: browser.runtime.getURL(`/workbench.html#/p/${project.id}`) }).catch((error) => {
+        recordDiagnostic("打开项目编辑器", error);
+      });
+      return;
+    }
     window.location.hash = `#/p/${project.id}`;
   };
 
@@ -224,6 +239,16 @@ export function Library({ port }: { port: WorkbenchPort }) {
   if (state === "loading") return <main className="project-loading">正在打开本地项目库…</main>;
   if (state === "error") return <main className="project-loading project-loading--error"><TriangleAlert size={18} /> {message}</main>;
 
+  const pageCount = Math.max(1, Math.ceil(workspaces.length / LIBRARY_PAGE_SIZE));
+  const pageIndex = Math.min(listPage, pageCount - 1);
+  const visibleWorkspaces = workspaces.slice(pageIndex * LIBRARY_PAGE_SIZE, pageIndex * LIBRARY_PAGE_SIZE + LIBRARY_PAGE_SIZE);
+
+  const openEditorTab = (id: string) => {
+    void browser.tabs.create({ url: browser.runtime.getURL(`/workbench.html#/p/${id}`) }).catch((error) => {
+      recordDiagnostic("打开项目编辑器", error);
+    });
+  };
+
   return (
     <main className="project-workspace">
       <header className="workspace-topbar">
@@ -259,7 +284,7 @@ export function Library({ port }: { port: WorkbenchPort }) {
         ) : null}
 
         <div className="project-list">
-          {workspaces.map((workspace) => {
+          {visibleWorkspaces.map((workspace) => {
             const { project } = workspace;
             return (
               <article className={`project-row project-row--${project.status}`} key={project.id}>
@@ -280,7 +305,10 @@ export function Library({ port }: { port: WorkbenchPort }) {
                     if (project.status === "archived" && !window.confirm(`“${project.name}”已归档，仍要启动演示吗？`)) return;
                     void runProject(workspace);
                   }} />
-                  <ToolbarButton icon={<FolderOpen size={16} />} title="编辑项目" onClick={() => { window.location.hash = `#/p/${project.id}`; }} />
+                  <ToolbarButton icon={<FolderOpen size={16} />} title="编辑项目" onClick={() => {
+                    if (embedded) openEditorTab(project.id);
+                    else window.location.hash = `#/p/${project.id}`;
+                  }} />
                   <ToolbarButton icon={<Copy size={16} />} title="复制项目" onClick={() => void (async () => {
                     const sourceTrusted = await projectTrustState(project) === "trusted";
                     const duplicate = duplicateProject(project);
@@ -323,6 +351,14 @@ export function Library({ port }: { port: WorkbenchPort }) {
             );
           })}
         </div>
+
+        {pageCount > 1 ? (
+          <nav className="project-pager" aria-label="项目库分页">
+            <ToolbarButton icon={<ChevronLeft size={14} />} title="上一页" disabled={pageIndex === 0} onClick={() => setListPage(pageIndex - 1)} />
+            <span>第 {pageIndex + 1} / {pageCount} 页</span>
+            <ToolbarButton icon={<ChevronRight size={14} />} title="下一页" disabled={pageIndex >= pageCount - 1} onClick={() => setListPage(pageIndex + 1)} />
+          </nav>
+        ) : null}
       </section>
 
       {packageDialog !== null ? (
