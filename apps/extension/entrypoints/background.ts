@@ -1271,7 +1271,7 @@ export default defineBackground(() => {
     if (machine) clearRuntimeSecrets(machine.session.id);
     await stopCapture().catch(() => undefined);
 
-    const launch = beginPresentationLaunch(workspace.project, workspace.session);
+    const launch = beginPresentationLaunch(workspace.project);
     machine = applyAction(initialMachineState(), { type: "set-workspace", project: launch.project, session: launch.session }).state;
     runtime.sessionWindowId = null;
     runtime.sessionTabId = null;

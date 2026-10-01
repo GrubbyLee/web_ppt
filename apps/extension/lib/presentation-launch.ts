@@ -18,58 +18,14 @@ function runnableProject(value: Project): Project {
   return { ...project, pages, totalPlannedSeconds: Math.max(1, pages.reduce((total, page) => total + page.estimatedSeconds, 0)) };
 }
 
-function runtimeSession(sourceProject: Project, project: Project, sourceSession: PresentationSession): PresentationSession {
-  const sourcePageIndex = Math.max(0, Math.min(sourceProject.pages.length - 1, sourceSession.currentPageIndex));
-  const currentPageId = sourceProject.pages[sourcePageIndex]?.id;
-  let currentPageIndex = currentPageId ? project.pages.findIndex((page) => page.id === currentPageId) : -1;
-  if (currentPageIndex < 0) {
-    const nextEnabledPage = sourceProject.pages.slice(sourcePageIndex + 1).find((page) => page.enabled);
-    currentPageIndex = nextEnabledPage ? project.pages.findIndex((page) => page.id === nextEnabledPage.id) : 0;
-  }
-  const activePageId = project.pages[currentPageIndex]?.id;
-  const stayedOnPage = activePageId === currentPageId;
-  const stayedInSection = sourceProject.pages[sourcePageIndex]?.section === project.pages[currentPageIndex]?.section;
-  const validPageIds = new Set(project.pages.map((page) => page.id));
-  const validStepIds = new Set(project.pages.flatMap((page) => page.script.steps.map((step) => step.id)));
-  const activeStepIds = new Set(project.pages[currentPageIndex]?.script.steps.map((step) => step.id) ?? []);
-
-  return {
-    ...sourceSession,
-    // A run always opens on a live picture. Ending a presentation persists
-    // screenMode "ended" into the stored session, so it must be reset here —
-    // otherwise the next run starts on the 演示结束 cover.
-    screenMode: "normal",
-    audienceStatus: "disconnected",
-    audienceCount: 0,
-    currentPageIndex,
-    pageElapsedMs: stayedOnPage ? sourceSession.pageElapsedMs : 0,
-    sectionElapsedMs: stayedInSection ? sourceSession.sectionElapsedMs : 0,
-    timerStartedAt: !stayedOnPage && sourceSession.timerStatus === "running" ? Date.now() : sourceSession.timerStartedAt,
-    autoAdvanceElapsedMs: stayedOnPage ? sourceSession.autoAdvanceElapsedMs : 0,
-    autoAdvanceStartedAt: null,
-    completedStepIds: sourceSession.completedStepIds.filter((stepId) => validStepIds.has(stepId)),
-    forcedStepCompletions: sourceSession.forcedStepCompletions.filter((completion) => validStepIds.has(completion.stepId)),
-    pendingHighRiskStepId: sourceSession.pendingHighRiskStepId && activeStepIds.has(sourceSession.pendingHighRiskStepId)
-      ? sourceSession.pendingHighRiskStepId
-      : null,
-    offlineFallbackPageId: sourceSession.offlineFallbackPageId === activePageId
-      ? sourceSession.offlineFallbackPageId
-      : null,
-    offlineNetworkGrants: sourceSession.offlineNetworkGrants.filter((grant) => validPageIds.has(grant.pageId)),
-    annotationTool: stayedOnPage ? sourceSession.annotationTool : "none",
-    circles: stayedOnPage ? sourceSession.circles : [],
-    laser: stayedOnPage ? sourceSession.laser : null
-  };
-}
-
-/** Build the isolated runtime workspace for a presentation run: disabled
- *  pages are stripped and the session migrates onto the filtered page list. */
-export function beginPresentationLaunch(project: Project, session: PresentationSession = createSession(project)): Workspace {
+export function beginPresentationLaunch(project: Project): Workspace {
   const runtimeProject = runnableProject(project);
-  const sessionSnapshot = session.projectId === runtimeProject.id
-    ? runtimeSession(project, runtimeProject, session)
-    : createSession(runtimeProject);
-  const workspace = parseWorkspace({ project: runtimeProject, session: sessionSnapshot });
+  // 点「运行」就是新的一场：从第 1 页、零计时、未完成的步骤开始。
+  // 上一场的进度（页码/计时/完成步骤）不再续用——续用会让演示在末页甚至
+  // 「演示结束」页上开场，演讲者以为演示已经结束。
+  // 意外退出后的恢复走 storage.session 的会话快照，不经过这里，不受影响。
+  const session = createSession(runtimeProject);
+  const workspace = parseWorkspace({ project: runtimeProject, session });
   if (!workspace) throw new Error("无法创建演示启动快照。");
   return workspace;
 }

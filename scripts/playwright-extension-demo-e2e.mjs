@@ -229,16 +229,19 @@ try {
   await after.waitForSelector(".panel-library", { timeout: 8_000 });
   assert(await after.isVisible("text=云枢 · 五角色能力治理闭环"), "结束后侧边栏回到项目库 / 落地状态");
 
-  console.log("11) 结束演示后再次运行：开场不是「演示结束」画面");
+  console.log("11) 结束演示后再次运行：从头开始");
   await after.getByTitle("启动演示运行时").click();
   await after.waitForSelector(".panel-page", { timeout: 15_000 });
   await after.waitForTimeout(2_500);
-  // 重开会恢复到上次结束的页码，可能是舞台页也可能是内置演示页。
   const reopened = context.pages().find((page) => page.url().includes("/stage.html") || page.url().includes("/demo.html"));
   assert(Boolean(reopened), "再次运行打开了演示画面");
+  assert(await after.isVisible("text=1/18"), "再次运行回到第 1 页（不续用上一场的进度）");
   // 封面挂在 documentElement 上（不在 body 里），必须按封面元素判定。
   const endedCovers = reopened ? await reopened.locator(".showit-cover.is-ended, .stage-cover--ended").count() : -1;
-  assert(endedCovers === 0, `再次运行的画面没有「演示结束」封面（screenMode 未被上次结束污染，封面数 ${endedCovers}）`);
+  assert(endedCovers === 0, `再次运行的画面没有「演示结束」封面（封面数 ${endedCovers}）`);
+  const reopenedText = reopened ? await reopened.textContent("body").catch(() => "") : "";
+  assert(!reopenedText.includes("演示结束") && !reopenedText.includes("收束"),
+    "再次运行的画面是开场封面，不是末页或结束页");
 
   await demoPage?.screenshot({ path: resolve(resultsDir, "demo-e2e-final.png") }).catch(() => undefined);
   console.log("内置示例端到端全产品验证通过。");
