@@ -82,6 +82,9 @@ try {
   }
   await sidepanel.waitForTimeout(400);
 
+  // 远程观众已收进「更多」：先展开再点。
+  await sidepanel.locator(".panel-group--deliver").getByText("更多").click();
+  await sidepanel.waitForTimeout(400);
   await sidepanel.locator(".panel-group--deliver").getByText("远程观众").click();
   await sidepanel.waitForSelector(".dialog input", { timeout: 5_000 });
   await sidepanel.locator(".dialog input").fill(`http://127.0.0.1:${relayPort}`);

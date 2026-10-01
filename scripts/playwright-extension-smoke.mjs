@@ -84,7 +84,8 @@ try {
   await sidepanel.waitForSelector("text=个本地项目", { timeout: 10_000 });
   assert(await sidepanel.isVisible("text=云枢 · 五角色能力治理闭环"), "侧边栏内嵌项目库列出内置示例");
   await sidepanel.waitForSelector("text=在标签页中打开工作台", { timeout: 5_000 });
-  assert(await sidepanel.isVisible("text=演讲者控制台"), "无会话时侧边栏是项目库 / 落地状态");
+  assert(await sidepanel.isVisible("text=项目库"), "无会话时侧边栏直接就是项目库（第一眼知道在哪）");
+  assert(await sidepanel.isVisible("text=从上方项目库选择一个项目并运行"), "首屏给出下一步该做什么的指引");
   const overflow = await sidepanel.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert(overflow <= 0, "侧边栏无水平溢出");
   await sidepanel.screenshot({ path: resolve(resultsDir, "extension-sidepanel.png") });
