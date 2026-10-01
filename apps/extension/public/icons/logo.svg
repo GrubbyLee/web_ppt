@@ -1,22 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Showit">
   <title>Showit</title>
-  <desc>一块演示幻灯片：左侧是业务系统画面，右侧青色竖条是侧边栏控制台，红点是激光笔。</desc>
+  <desc>品牌青整块填充（工具栏辨识度）；白色幻灯片是观众看到的画面，右侧深色竖条是侧边栏控制台，红点是激光笔。</desc>
   <defs>
-    <linearGradient id="showit-stage" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1b2634" />
-      <stop offset="1" stop-color="#0c1016" />
+    <linearGradient id="showit-brand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#48e4cc" />
+      <stop offset="1" stop-color="#20b099" />
     </linearGradient>
   </defs>
-  <!-- 演示者窗口 -->
-  <rect width="128" height="128" rx="30.7" fill="url(#showit-stage)" />
-  <!-- 幻灯片 -->
-  <rect x="16.64" y="19.2" width="94.72" height="89.6" rx="9.6" fill="#f5f8fb" />
-  <!-- 业务画面：标题与正文 -->
-  <rect x="26.24" y="36.48" width="47.36" height="8.96" rx="2.82" fill="#26313d" />
-  <rect x="26.24" y="56.32" width="52.48" height="6.02" rx="2.3" fill="#a7b6c4" />
-  <rect x="26.24" y="67.84" width="37.76" height="6.02" rx="2.3" fill="#a7b6c4" />
+  <!-- 品牌青整块 -->
+  <rect width="128" height="128" rx="30.7" fill="url(#showit-brand)" />
   <!-- 侧边栏控制台 -->
-  <rect x="87.68" y="26.24" width="16.64" height="75.52" rx="3.84" fill="#37d0ba" />
+  <rect x="90.88" y="19.2" width="21.76" height="89.6" rx="5.76" fill="#0d141b" />
+  <!-- 幻灯片（观众看到的业务画面） -->
+  <rect x="15.36" y="19.2" width="69.12" height="89.6" rx="8.96" fill="#ffffff" />
+  <!-- 画面内容：标题与正文 -->
+  <rect x="21.76" y="35.84" width="49.92" height="10.24" rx="2.82" fill="#0d141b" />
+  <rect x="21.76" y="57.6" width="52.48" height="5.76" rx="2.3" fill="#b0c0cd" />
+  <rect x="21.76" y="69.12" width="37.12" height="5.76" rx="2.3" fill="#b0c0cd" />
   <!-- 激光笔 -->
-  <circle cx="51.2" cy="89.6" r="7.04" fill="#ff5f6d" />
+  <circle cx="42.24" cy="87.04" r="6.4" fill="#ff5f6d" />
 </svg>

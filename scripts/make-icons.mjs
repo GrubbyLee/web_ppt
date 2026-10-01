@@ -21,13 +21,14 @@ const sizes = process.env.SHOWIT_ICON_SIZES
 const outDir = resolve(process.argv[2] ?? "apps/extension/public/icons");
 const SS = 4;
 
+/* 工具栏上要和一堆单色图标抢注意力：整块用品牌青填充，白幻灯片与深色控制台条
+   负责块内对比。深底版本在浅色/深色工具栏上都会糊，所以不再使用。 */
 const PALETTE = {
-  slateTop: [27, 38, 52],
-  slateBottom: [12, 16, 22],
-  paper: [245, 248, 251],
-  teal: [55, 208, 186],
-  ink: [38, 49, 61],
-  muted: [167, 182, 196],
+  tealTop: [72, 228, 204],
+  tealBottom: [32, 176, 153],
+  paper: [255, 255, 255],
+  ink: [13, 20, 27],
+  muted: [176, 192, 205],
   laser: [255, 95, 109]
 };
 
@@ -91,20 +92,24 @@ function encodeIcon(size) {
   // Premultiplied RGBA accumulator over the supersampled grid.
   const acc = new Float64Array(n * n * 4);
 
+  // 小尺寸只保留能读出来的形状：标题条与激光点在 16/32px 下只是噪点。
+  const detailed = size >= 48;
   const shapes = [
-    // Stage backdrop: the presenter window.
-    { test: roundedRect(0, 0, 1, 1, 0.24), paint: verticalGradient(PALETTE.slateTop, PALETTE.slateBottom) },
-    // The slide itself.
-    { test: roundedRect(0.13, 0.15, 0.87, 0.85, 0.075), paint: () => PALETTE.paper },
-    // Title + body lines: the business content on the slide.
-    { test: roundedRect(0.205, 0.285, 0.575, 0.355, 0.022), paint: () => PALETTE.ink },
-    { test: roundedRect(0.205, 0.44, 0.615, 0.487, 0.018), paint: () => PALETTE.muted },
-    { test: roundedRect(0.205, 0.53, 0.5, 0.577, 0.018), paint: () => PALETTE.muted },
-    // Right-hand column: the side panel console.
-    { test: roundedRect(0.685, 0.205, 0.815, 0.795, 0.03), paint: () => PALETTE.teal }
+    // 整块品牌青：工具栏上的辨识度来源。
+    { test: roundedRect(0, 0, 1, 1, 0.24), paint: verticalGradient(PALETTE.tealTop, PALETTE.tealBottom) },
+    // 右侧深色竖条：侧边栏控制台。
+    { test: roundedRect(0.71, 0.15, 0.88, 0.85, 0.045), paint: () => PALETTE.ink },
+    // 白幻灯片：观众看到的画面。
+    { test: roundedRect(0.12, 0.15, 0.66, 0.85, 0.07), paint: () => PALETTE.paper }
   ];
-  // The laser dot is a 16px liability — keep the small sizes clean.
-  if (size >= 32) shapes.push({ test: circle(0.4, 0.7, 0.055), paint: () => PALETTE.laser });
+  if (size >= 32) shapes.push({ test: roundedRect(0.17, 0.28, 0.56, 0.36, 0.022), paint: () => PALETTE.ink });
+  if (detailed) {
+    shapes.push(
+      { test: roundedRect(0.17, 0.45, 0.58, 0.495, 0.018), paint: () => PALETTE.muted },
+      { test: roundedRect(0.17, 0.54, 0.46, 0.585, 0.018), paint: () => PALETTE.muted },
+      { test: circle(0.33, 0.68, 0.05), paint: () => PALETTE.laser }
+    );
+  }
 
   for (const shape of shapes) {
     for (let py = 0; py < n; py += 1) {
