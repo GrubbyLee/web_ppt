@@ -82,15 +82,15 @@ try {
   }
   await sidepanel.waitForTimeout(400);
 
-  await sidepanel.locator(".panel-footer__modes").getByText("远程观众").click();
+  await sidepanel.locator(".panel-group--deliver").getByText("远程观众").click();
   await sidepanel.waitForSelector(".dialog input", { timeout: 5_000 });
   await sidepanel.locator(".dialog input").fill(`http://127.0.0.1:${relayPort}`);
   await sidepanel.getByText("开启远程观众").click();
   await sidepanel.waitForTimeout(1_500);
-  const relayChip = await sidepanel.textContent(".panel-footer__modes").catch(() => "");
+  const relayChip = await sidepanel.textContent(".panel-group--deliver").catch(() => "");
   assert(relayChip?.includes("远程"), "控制台出现远程观众控件");
   // The footer button now ends the room; reopen the dialog to view the link.
-  await sidepanel.locator(".panel-footer__modes").getByText(/远程/).first().click();
+  await sidepanel.locator(".panel-group--deliver").getByText(/远程/).first().click();
   await sidepanel.waitForSelector(".panel-relay__link code", { timeout: 5_000 });
   const shareLink = await sidepanel.locator(".panel-relay__link code").textContent();
   assert(Boolean(shareLink && shareLink.includes("/watch/")), `控制台显示观众链接（${shareLink?.slice(0, 60)}…）`);
@@ -106,7 +106,7 @@ try {
   assert(bootstrapTitle.includes("Showit 观众屏") || bootstrapTitle.includes("云枢"), `观看页标题正确（${bootstrapTitle}）`);
 
   console.log("4) 快照同步（翻页 → 观众页码更新）");
-  await sidepanel.locator(".panel-footer__nav").getByTitle("下一页").click().catch(() => undefined);
+  await sidepanel.locator(".panel-page-nav").getByTitle("下一页").click().catch(() => undefined);
   await sidepanel.waitForTimeout(1_500);
   await viewerPage.waitForFunction(() => {
     const badge = document.querySelector("#pageNo");
@@ -130,7 +130,7 @@ try {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const at = await sidepanel.locator(".panel-page__index").textContent().catch(() => null);
     if ((at ?? "").trim() === "6/18") break;
-    await sidepanel.locator(".panel-footer__nav").getByTitle("下一页").click();
+    await sidepanel.locator(".panel-page-nav").getByTitle("下一页").click();
     await sidepanel.waitForTimeout(500);
   }
   await sidepanel.waitForTimeout(1_200);
@@ -158,7 +158,7 @@ try {
     await sidepanel.keyboard.press("Escape");
   });
   await sidepanel.waitForTimeout(400);
-  await sidepanel.locator(".panel-footer__modes").getByText("结束").click();
+  await sidepanel.locator(".panel-group--end").getByText("结束演示").click();
   // The side panel may live inside the session window that teardown closes;
   // wait on the (always-open) workbench page instead.
   await workbench.waitForTimeout(1_500);

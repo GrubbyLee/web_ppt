@@ -128,7 +128,7 @@ try {
   }
 
   console.log("3) 会话业务标签");
-  const navNext = sidepanel.locator(".panel-footer__nav").getByTitle("下一页");
+  const navNext = sidepanel.locator(".panel-page-nav").getByTitle("下一页");
   for (let index = 0; index < 5; index += 1) {
     await navNext.click();
     await sidepanel.waitForTimeout(500);
@@ -152,10 +152,10 @@ try {
   assert(Boolean(totalTimer && totalTimer.trim().length > 0), "计时器在渲染");
 
   console.log("5) 翻页导航");
-  await sidepanel.locator(".panel-footer__nav").getByTitle("上一页").click();
+  await sidepanel.locator(".panel-page-nav").getByTitle("上一页").click();
   await sidepanel.waitForTimeout(1_200);
   assert(await sidepanel.isVisible("text=5/18"), "翻回第 5/18 页（章节幻灯片）");
-  await sidepanel.locator(".panel-footer__nav").getByTitle("下一页").click();
+  await sidepanel.locator(".panel-page-nav").getByTitle("下一页").click();
   await sidepanel.waitForTimeout(1_500);
   assert(await sidepanel.isVisible("text=6/18"), "回到第 6/18 页");
   const businessUrl = businessPage ? await businessPage.url() : "";
@@ -172,7 +172,7 @@ try {
 
   console.log("6) 观众窗口与画面授权");
   await sidepanel.getByTitle("共享画面").or(sidepanel.locator("button", { hasText: "共享画面" })).first().click({ timeout: 3_000 }).catch(async () => {
-    await sidepanel.locator(".panel-footer__modes").getByText("共享画面").click();
+    await sidepanel.locator(".panel-group--deliver").getByText("共享画面").click();
   });
   await sidepanel.waitForTimeout(2_000);
   const audiencePage = context.pages().find((page) => page.url().includes("/audience.html"));
@@ -198,7 +198,7 @@ try {
   }
 
   console.log("7) 结束演示");
-  await sidepanel.locator(".panel-footer__modes").getByText("结束").click();
+  await sidepanel.locator(".panel-group--end").getByText("结束演示").click();
   const waitForPagesGone = async (predicate, label) => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       if (!context.pages().some(predicate)) return true;

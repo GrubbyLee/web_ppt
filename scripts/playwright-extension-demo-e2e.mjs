@@ -88,7 +88,7 @@ try {
   assert(stageTabs === 1, `重新运行后只剩一个会话画面标签（${stageTabs}），未残留上一个业务实例`);
 
   console.log("3) 进入演示页与登录关卡");
-  const navNext = sidepanel.locator(".panel-footer__nav").getByTitle("下一页");
+  const navNext = sidepanel.locator(".panel-page-nav").getByTitle("下一页");
   for (let index = 0; index < 5; index += 1) {
     await navNext.click();
     await sidepanel.waitForTimeout(450);
@@ -176,7 +176,7 @@ try {
   await sidepanel.waitForTimeout(800);
   assert(await demoPage.locator("[data-showit-overlay] .showit-circle").count() === 1, "圈选标注已渲染在演示页");
 
-  await sidepanel.locator(".panel-footer__modes").getByText("共享画面").click();
+  await sidepanel.locator(".panel-group--deliver").getByText("共享画面").click();
   await sidepanel.waitForTimeout(1_500);
   const audiencePage = context.pages().find((page) => page.url().includes("/audience.html"));
   assert(Boolean(audiencePage), "观众窗口已打开");
@@ -195,7 +195,7 @@ try {
   }
 
   console.log("9) 离线备用");
-  const navPrev = sidepanel.locator(".panel-footer__nav").getByTitle("上一页");
+  const navPrev = sidepanel.locator(".panel-page-nav").getByTitle("上一页");
   for (let index = 0; index < 7; index += 1) {
     await navPrev.click();
     await sidepanel.waitForTimeout(450);
@@ -215,7 +215,7 @@ try {
   await sidepanel.waitForTimeout(1_000);
 
   console.log("10) 结束演示");
-  await sidepanel.locator(".panel-footer__modes").getByText("结束").click();
+  await sidepanel.locator(".panel-group--end").getByText("结束演示").click();
   await sidepanel.waitForTimeout(2_500).catch(() => undefined);
   if (context.pages().some((page) => page.url().includes("/demo.html"))) {
     console.log("    窗口列表：", JSON.stringify(await serviceWorker.evaluate(async () => (await chrome.windows.getAll({ populate: true })).map((win) => ({ id: win.id, tabs: win.tabs?.map((tab) => (tab.url ?? "").slice(-30)) })))));
@@ -228,6 +228,17 @@ try {
   await after.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await after.waitForSelector(".panel-library", { timeout: 8_000 });
   assert(await after.isVisible("text=云枢 · 五角色能力治理闭环"), "结束后侧边栏回到项目库 / 落地状态");
+
+  console.log("11) 结束演示后再次运行：开场不是「演示结束」画面");
+  await after.getByTitle("启动演示运行时").click();
+  await after.waitForSelector(".panel-page", { timeout: 15_000 });
+  await after.waitForTimeout(2_500);
+  // 重开会恢复到上次结束的页码，可能是舞台页也可能是内置演示页。
+  const reopened = context.pages().find((page) => page.url().includes("/stage.html") || page.url().includes("/demo.html"));
+  assert(Boolean(reopened), "再次运行打开了演示画面");
+  // 封面挂在 documentElement 上（不在 body 里），必须按封面元素判定。
+  const endedCovers = reopened ? await reopened.locator(".showit-cover.is-ended, .stage-cover--ended").count() : -1;
+  assert(endedCovers === 0, `再次运行的画面没有「演示结束」封面（screenMode 未被上次结束污染，封面数 ${endedCovers}）`);
 
   await demoPage?.screenshot({ path: resolve(resultsDir, "demo-e2e-final.png") }).catch(() => undefined);
   console.log("内置示例端到端全产品验证通过。");
