@@ -256,7 +256,11 @@ function broadcastMeta(): BroadcastMeta {
     remote: remoteRoom,
     offlineOriginRequest: runtime.offlineOriginRequest,
     message: runtime.message,
-    demoMutations
+    demoMutations,
+    // Same URL the dedicated session tab shows, so the workbench can embed the
+    // exact picture the presenter is driving (presenter-only; audiences get the
+    // captured tab, never this frame).
+    previewUrl: machine ? targetUrlForPage(currentPage()) : null
   };
 }
 
@@ -613,21 +617,15 @@ async function resolvePresenterWindowId(): Promise<number | null> {
   return fallback?.id ?? null;
 }
 
-/** Keep the console docked next to the stage. Best effort: Chrome can require
- *  a user gesture, and the panel is already open in the presenter window. */
-function revealConsoleFor(tabId: number | undefined): void {
-  if (tabId === undefined) return;
-  void browser.sidePanel.open({ tabId }).catch(() => undefined);
-}
-
 /** Open the session surface (business page / stage / demo console).
  *
- *  The stage tab is created **inside the presenter window** — the window that
- *  hosts the side panel console — rather than in a window of its own. A
- *  separate window makes every console interaction (laser pointer, circle,
- *  screen modes, step advance) steal focus from the stage: the business page
- *  drops to another window and the presenter loses sight of it mid-talk.
- *  Only a dedicated (incognito) session still needs its own window, because an
+ *  The presenter watches the picture **embedded in the workbench page**
+ *  (stage-viewport), so this tab is only the surface the extension drives and
+ *  captures: it is created in the presenter window **in the background** so it
+ *  never takes focus and never covers the console. Focus must stay on the
+ *  presenter's page — otherwise every console interaction (laser pointer,
+ *  circle, screen modes, step advance) blurs the picture mid-talk.
+ *  Only a dedicated (incognito) session still gets its own window, because an
  *  incognito profile cannot share the presenter's normal window. */
 async function openSessionWindow(targetUrl: string, hostWindowId?: number | null): Promise<void> {
   const dedicated = machine?.session.browserSessionMode === "dedicated";
@@ -643,7 +641,7 @@ async function openSessionWindow(targetUrl: string, hostWindowId?: number | null
   const kind = targetUrl === stageUrl() ? "stage" : targetUrl.includes("/demo.html") ? "demo" : "business";
   const windowId = incognito ? null : hostWindowId ?? await resolvePresenterWindowId();
   if (windowId !== null) {
-    const tab = await browser.tabs.create({ url: targetUrl, windowId, active: true }).catch((error) => {
+    const tab = await browser.tabs.create({ url: targetUrl, windowId, active: false }).catch((error) => {
       recordDiagnostic("打开演示标签", error);
       return null;
     });
@@ -655,7 +653,6 @@ async function openSessionWindow(targetUrl: string, hostWindowId?: number | null
       runtime.tabKind = kind;
       runtime.tabStatus = "loading";
       runtime.tabUnsafeOrigin = false;
-      revealConsoleFor(tab.id);
       return;
     }
     // The presenter window vanished between launch and here — fall through and
@@ -669,7 +666,6 @@ async function openSessionWindow(targetUrl: string, hostWindowId?: number | null
   runtime.tabKind = kind;
   runtime.tabStatus = "loading";
   runtime.tabUnsafeOrigin = false;
-  revealConsoleFor(tab?.id);
 }
 
 let navigationToken = 0;
@@ -930,7 +926,7 @@ export default defineBackground(() => {
     };
 
     if (!result?.ok) {
-      runtime.stepExecution = { stepId, state: "failed", reason: String(result?.reason || "动作执行失败").slice(0, 200) };
+      runtime.stepExecution = { stepId, state: "failed", reason: stepFailureReason(result?.reason, action).slice(0, 200) };
       restoreScreenMode();
       broadcastState();
       return;
@@ -939,7 +935,7 @@ export default defineBackground(() => {
     if (step.expectedCondition && isValidExpectedCondition(step.expectedCondition as unknown as Record<string, unknown>)) {
       const condition = await waitForCondition(runtime.sessionTabId, step.expectedCondition as unknown as Record<string, unknown>, step.conditionTimeoutSeconds);
       if (!condition.ok) {
-        runtime.stepExecution = { stepId, state: "failed", reason: condition.reason };
+        runtime.stepExecution = { stepId, state: "failed", reason: stepFailureReason(condition.reason).slice(0, 200) };
         restoreScreenMode();
         broadcastState();
         return;
@@ -960,6 +956,22 @@ export default defineBackground(() => {
     runtime.stepExecution = { stepId, state: "manual" };
     broadcastState();
     if (sensitiveFill && machine.session.screenMode === "privacy" && previousScreenMode === "normal") applyMachineAction({ type: "set-screen-mode", screenMode: "normal" });
+  }
+
+  /** Turn a raw execution/connector failure into something the presenter can
+   *  act on. "元素无法定位" on its own is useless when the real cause is that
+   *  the business page is still sitting on its login gate. */
+  function stepFailureReason(detail: string | undefined, action?: Record<string, unknown>): string {
+    let base = String(detail || "动作执行失败").slice(0, 160);
+    const locator = action?.locator as { strategy?: string; value?: string } | undefined;
+    if (locator?.strategy && locator?.value) base = `${base}：${locator.strategy}=${String(locator.value).slice(0, 60)}`;
+    const state = runtime.connectorState?.state;
+    if (state === "anonymous") return `业务页未登录，请先完成登录步骤再执行（${base}）`;
+    if (state === "role-mismatch") return `业务角色与页面要求不符，请切换到“${currentPage()?.role ?? ""}”对应账号（${base}）`;
+    if (state === "blocked") return `业务页存在敏感输入或画面受阻：${base}`;
+    if (state === "error") return `业务页连接器异常：${base}`;
+    if (!businessReady()) return `业务画面尚未就绪：${base}`;
+    return base;
   }
 
   function handleExecuteStep(stepId: string, confirmed = false): void {
@@ -1142,9 +1154,33 @@ export default defineBackground(() => {
     if (!machine || captureActive) return;
     runtime.message = "授权请求已收到，正在捕获画面…";
     broadcastState();
-    await startCapture();
+    // Chrome grants the capture stream to a tab the extension was invoked on
+    // (activeTab). The session tab now runs in the background behind the
+    // workbench, so a gesture on the console cannot grant it directly: focus it
+    // for the grant, then hand focus straight back to the presenter's page.
+    const restored = await focusSessionTabForGrant();
+    try {
+      await startCapture();
+    } finally {
+      await restored();
+    }
     if (captureActive) runtime.message = null;
     broadcastState();
+  }
+
+  /** Briefly activate the session tab and return a callback that restores the
+   *  previously active tab. No-op when there is nothing to switch. */
+  async function focusSessionTabForGrant(): Promise<() => Promise<void>> {
+    const tabId = runtime.sessionTabId;
+    if (tabId === null) return async () => undefined;
+    const [active] = await browser.tabs.query({ windowId: runtime.presenterWindowId ?? undefined, active: true }).catch(() => [] as Browser.tabs.Tab[]);
+    const previousTabId = active?.id ?? null;
+    await browser.tabs.update(tabId, { active: true }).catch(() => undefined);
+    return async () => {
+      if (previousTabId !== null && previousTabId !== tabId) {
+        await browser.tabs.update(previousTabId, { active: true }).catch(() => undefined);
+      }
+    };
   }
 
   function registerViewer(viewerId: string): void {
