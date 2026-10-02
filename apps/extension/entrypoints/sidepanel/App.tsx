@@ -839,8 +839,28 @@ function RelayDialog({ value, onChange, remote, copied, onCopied, onOpen, onEnd,
   onKick: (viewerId: string) => void;
   onClose: () => void;
 }) {
+  const [health, setHealth] = useState<"idle" | "checking" | "ok" | "error">("idle");
+  const [healthMessage, setHealthMessage] = useState("");
+
+  async function checkRelay(): Promise<void> {
+    const base = value.trim().replace(/\/$/, "");
+    if (!base) return;
+    setHealth("checking");
+    setHealthMessage("");
+    try {
+      const response = await fetch(`${base}/health`, { cache: "no-store" });
+      const body = await response.json() as { ok?: boolean; service?: string; capabilities?: { p2p?: boolean; sfu?: boolean } };
+      if (!response.ok || body.ok !== true || body.service !== "showit-relay") throw new Error("地址不是 Showit 中继服务。");
+      setHealth("ok");
+      setHealthMessage(body.capabilities?.sfu ? "中继在线" : "中继在线 · P2P 模式");
+    } catch (error) {
+      setHealth("error");
+      setHealthMessage(error instanceof Error ? error.message : "无法连接中继服务。");
+    }
+  }
+
   return (
-    <Dialog title="远程观众（局域网 / 公网）" onClose={onClose}>
+    <Dialog title="远程观众" onClose={onClose}>
       {remote ? (
         <>
           <p>房间已开启。把下面的链接发给观众（也可用二维码工具生成）：</p>
@@ -869,15 +889,17 @@ function RelayDialog({ value, onChange, remote, copied, onCopied, onOpen, onEnd,
         </>
       ) : (
         <>
-          <p>填写观众中继服务地址。局域网部署在内网主机，公网部署使用域名（HTTPS）。</p>
+          <p>填写 Showit 中继服务地址。中继只转发已合成的观众画面，不访问业务系统。</p>
           <label className="field">
-            <span>中继地址（如 http://192.168.1.10:8787 或 https://demo.example.com）</span>
-            <input autoFocus value={value} placeholder="http://192.168.1.10:8787" onChange={(event) => onChange(event.target.value)} />
+            <span>中继地址</span>
+            <input autoFocus value={value} placeholder="http://127.0.0.1:8787" onChange={(event) => { onChange(event.target.value); setHealth("idle"); setHealthMessage(""); }} />
           </label>
           <div className="dialog__actions">
+            <ToolbarButton icon="✓" label={health === "checking" ? "检查中…" : "检查连接"} disabled={health === "checking" || !value.trim().startsWith("http")} onClick={() => void checkRelay()} />
             <ToolbarButton icon="🌐" label="开启远程观众" variant="primary" disabled={!value.trim().startsWith("http")} onClick={onOpen} />
           </div>
-          <p className="panel-relay__hint">中继服务随 Showit 交付（apps/relay），一条 Docker 命令即可部署；观众无需安装任何软件。</p>
+          {healthMessage ? <p className={`panel-relay__health panel-relay__health--${health}`}>{healthMessage}</p> : null}
+          <p className="panel-relay__hint">开发时可运行 `npm run relay:dev`；生产环境使用随 Showit 交付的 relay 服务。</p>
         </>
       )}
     </Dialog>

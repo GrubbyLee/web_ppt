@@ -43,6 +43,12 @@ function openSocket(path: string): Promise<WebSocket> {
 }
 
 describe("relay integration", () => {
+  it("reports a product health document", async () => {
+    const response = await fetch(`${base}/health`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, service: "showit-relay", capabilities: { p2p: true, sfu: false, persistence: false } });
+  });
+
   it("creates a room and serves the watch page only while it exists", async () => {
     const room = await createRoom();
     const watch = await fetch(`${base}/watch/${room.roomCode}`);

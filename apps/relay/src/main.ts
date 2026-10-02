@@ -178,7 +178,7 @@ route("GET", "/demo/assets/(.+)", (_request, response, match) => {
 });
 
 route("GET", "/health", (_request, response) => {
-  sendJson(response, 200, { ok: true, rooms: 0 });
+  sendJson(response, 200, { ok: true, service: "showit-relay", version: "0.3.0", rooms: store.activeRoomCount(), capabilities: { p2p: true, sfu: false, persistence: false } });
 });
 
 const server = createServer(async (request, response) => {

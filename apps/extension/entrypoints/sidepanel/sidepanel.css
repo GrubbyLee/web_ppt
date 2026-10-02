@@ -486,6 +486,19 @@
   line-height: 1.6;
 }
 
+.panel-relay__health {
+  margin: 0;
+  font-size: 12px;
+}
+
+.panel-relay__health--ok {
+  color: var(--signal-teal);
+}
+
+.panel-relay__health--error {
+  color: var(--danger-400);
+}
+
 .panel-relay__pending {
   display: flex;
   flex-direction: column;

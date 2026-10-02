@@ -1,0 +1,151 @@
+{
+  "kind": "showit-project",
+  "packageVersion": 1,
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "project": {
+    "id": "northstar-supply-demo",
+    "formatVersion": 1,
+    "name": "Northstar Supply 运营演示",
+    "description": "一个独立运行的普通 HTTP 业务系统示例，用于验证 Showit 的真实业务页连接、登录、步骤执行和观众投送。",
+    "status": "draft",
+    "totalPlannedSeconds": 300,
+    "autoAdvanceEnabled": false,
+    "autoAdvanceSeconds": 90,
+    "audienceJoinMode": "direct",
+    "audienceCapacityMode": "p2p-5",
+    "browserSessionMode": "daily",
+    "variables": [],
+    "sensitiveVariables": [
+      {
+        "key": "northstarPassword",
+        "label": "Northstar 演示密码",
+        "description": "只在执行登录步骤时填写，不保存到项目文件。",
+        "required": true,
+        "expiresAfterMinutes": 60
+      }
+    ],
+    "brand": {
+      "primaryColor": "#176b66",
+      "statusBackgroundColor": "#17333a",
+      "maskTitle": "敏感信息遮挡，请稍候",
+      "privacyMessage": "登录信息已保护",
+      "loadingMessage": "正在打开 Northstar Supply",
+      "offlineLabel": "离线备用",
+      "endTitle": "Northstar 演示结束",
+      "endDescription": "感谢观看",
+      "audienceTitle": "Northstar Supply 观众屏"
+    },
+    "layout": { "stagePercent": 56, "preset": "stage", "noteFontScale": 1 },
+    "connectors": [
+      {
+        "id": "northstar-local",
+        "name": "Northstar Supply 本地 Demo",
+        "origin": "http://127.0.0.1:3001",
+        "mode": "window",
+        "permission": "automate",
+        "securityMode": "interactive",
+        "environment": "本地 Demo",
+        "requestHeaders": [],
+        "basicAuthInstructions": "",
+        "loginPaths": ["/"],
+        "logoutPaths": ["/"],
+        "roleSwitchPaths": [],
+        "sandboxPermissions": [],
+        "allowedOrigins": ["http://127.0.0.1:3001"]
+      }
+    ],
+    "pages": [
+      {
+        "id": "northstar-login",
+        "order": 0,
+        "pageType": "business",
+        "enabled": true,
+        "title": "登录 Northstar Supply",
+        "section": "进入业务系统",
+        "tags": ["登录", "敏感信息"],
+        "purpose": "验证真实业务页登录、敏感变量和观众隐私保护。",
+        "transitionNote": "先完成登录，再进入运营概览。",
+        "errorHandling": "确认 demo 服务已通过 npm run demo:dev 启动。",
+        "role": "运营经理",
+        "businessLabel": "Northstar Supply 登录页",
+        "url": "http://127.0.0.1:3001",
+        "privacyMasks": [],
+        "variables": [],
+        "connectorId": "northstar-local",
+        "estimatedSeconds": 90,
+        "script": {
+          "markdown": "## 登录业务系统\n\n1. 填写工作邮箱。\n2. 执行到密码步骤时输入演示密码。\n3. 登录后进入运营概览。",
+          "steps": [
+            {
+              "id": "northstar-fill-account",
+              "kind": "act",
+              "text": "填写工作邮箱",
+              "action": "填写演示账号",
+              "execution": "auto",
+              "recordedAction": { "type": "fill", "locator": { "strategy": "testid", "value": "login-username" }, "input": { "source": "fixed", "value": "operator@northstar.example" }, "label": "工作邮箱" }
+            },
+            {
+              "id": "northstar-fill-password",
+              "kind": "act",
+              "text": "填写演示密码",
+              "action": "填写运行时敏感变量",
+              "execution": "auto",
+              "recordedAction": { "type": "fill", "locator": { "strategy": "testid", "value": "login-password" }, "input": { "source": "sensitive", "key": "northstarPassword" }, "label": "演示密码" }
+            },
+            {
+              "id": "northstar-submit-login",
+              "kind": "act",
+              "text": "登录 Northstar Supply",
+              "action": "点击登录",
+              "execution": "auto",
+              "recordedAction": { "type": "click", "locator": { "strategy": "testid", "value": "login-submit" }, "label": "登录" },
+              "expectedCondition": { "type": "element", "locator": { "strategy": "testid", "value": "nav-overview" } },
+              "conditionTimeoutSeconds": 8
+            }
+          ],
+          "fallback": "如果登录失败，请确认独立 Demo 正在 127.0.0.1:3001 运行。"
+        }
+      },
+      {
+        "id": "northstar-overview",
+        "order": 1,
+        "pageType": "business",
+        "enabled": true,
+        "title": "运营概览",
+        "section": "库存与履约",
+        "tags": ["概览", "指标"],
+        "purpose": "展示真实业务系统登录后的首页和运营指标。",
+        "transitionNote": "从总览进入库存管理。",
+        "errorHandling": "检查登录状态和 Demo 服务。",
+        "role": "运营经理",
+        "businessLabel": "Northstar Supply 运营概览",
+        "url": "http://127.0.0.1:3001",
+        "privacyMasks": [],
+        "variables": [],
+        "connectorId": "northstar-local",
+        "estimatedSeconds": 90,
+        "script": { "markdown": "## 运营概览\n\n查看库存、待处理订单和供应商准时率。", "steps": [], "fallback": "说明关键指标。" }
+      },
+      {
+        "id": "northstar-inventory",
+        "order": 2,
+        "pageType": "business",
+        "enabled": true,
+        "title": "库存管理",
+        "section": "库存与履约",
+        "tags": ["库存", "搜索"],
+        "purpose": "演示业务列表、搜索和库存状态。",
+        "transitionNote": "最后查看需要关注的库存状态。",
+        "errorHandling": "确认页面已完成登录。",
+        "role": "运营经理",
+        "businessLabel": "Northstar Supply 库存管理",
+        "url": "http://127.0.0.1:3001",
+        "privacyMasks": [],
+        "variables": [],
+        "connectorId": "northstar-local",
+        "estimatedSeconds": 120,
+        "script": { "markdown": "## 库存管理\n\n搜索商品、查看 SKU 和库存预警。", "steps": [], "fallback": "说明库存状态。" }
+      }
+    ]
+  }
+}

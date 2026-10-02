@@ -12,9 +12,10 @@ Showit 是**本地优先的网页演示工作台**，以 Chrome 扩展（WXT / M
 
 ```
 packages/contracts/   Zod 数据合同 + 推断类型（唯一真相源，跨 app 共享）
+demo/                 独立 Northstar Supply 业务 Demo，普通 HTTP 页面，完全不依赖 Showit
 apps/extension/       WXT + React 的 Chrome MV3 扩展（产品本体）
 apps/relay/           观众中继：Node http + ws + SSE，无持久化、无账号
-apps/demo-site/       Vite；产物输出到 apps/relay/public/demo（中继托管的演练控制台）
+apps/demo-site/       内置云枢示例的中继托管副本（兼容路径）
 scripts/              Playwright 回归 + 打包/体积门禁/图标脚本
 docs/                 需求/方案/计划/用户手册/发布回滚/法务
 ```

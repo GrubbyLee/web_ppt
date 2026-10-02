@@ -61,6 +61,10 @@ export class RoomStore {
   private rooms = new Map<string, Room>();
   private roomsByPresenterToken = new Map<string, string>();
 
+  activeRoomCount(): number {
+    return [...this.rooms.values()].filter((room) => !room.ended).length;
+  }
+
   createRoom(options: { baseUrl: string; capacity: "p2p" | "sfu"; joinMode: "direct" | "approval" }): RoomSummary {
     if (this.rooms.size >= MAX_ROOMS) this.evictIdleRooms(new Date());
     if (this.rooms.size >= MAX_ROOMS) throw new RelayError("rooms-exhausted", "中继房间数量已达上限，请稍后重试。", 503);

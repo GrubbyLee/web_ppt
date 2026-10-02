@@ -17,6 +17,10 @@ v0.2.0 完成了从 Tauri 桌面端到纯浏览器扩展的架构重写（见 [v
 npm install
 npm run dev            # WXT 开发模式
 npm run typecheck
+npm run demo:dev
+npm run demo:build        # 构建独立业务 Demo
+npm run relay:dev         # 启动本机观众中继（默认 127.0.0.1:8787）
+npm run build:demo-site   # 构建内置示例的中继托管副本
 npm run test           # vitest 单元测试
 npm run build          # wxt build + 体积门禁
 npm run test:extension-browser   # 组件级冒烟（清单/侧边栏/工作台/内容脚本）
@@ -39,6 +43,9 @@ apps/extension（WXT, Chrome MV3）
 ├─ session/machine.ts           # 纯函数会话状态机（30+ 动作）
 ├─ lib/                         # 从 v0.1 移植的纯逻辑库（含测试）
 └─ messaging/protocol.ts        # 扩展内部消息协议
+demo/                       # 独立业务系统 Demo（Northstar Supply），不依赖 Showit
+apps/demo-site/             # 内置云枢示例的中继托管副本（兼容路径）
+apps/relay/                 # 观众中继服务：只转发源端已合成的观众画面
 packages/contracts              # 项目/页面/步骤/连接器/版本/排练 Zod 合同（与 v0.1 兼容）
 ```
 

@@ -1,0 +1,79 @@
+:root { font-family: Inter, "Noto Sans SC", system-ui, sans-serif; color: #17222f; background: #f3f6f8; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 960px; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.login-shell { min-height: 100vh; display: grid; place-items: center; background: #edf3f1; }
+.login-panel { width: min(420px, calc(100vw - 48px)); padding: 44px; background: white; border: 1px solid #d9e4e0; box-shadow: 0 20px 60px rgba(25, 51, 62, .1); }
+.brand-mark { width: 44px; height: 44px; display: grid; place-items: center; background: #176b66; color: white; font-size: 22px; font-weight: 800; letter-spacing: 0; }
+.brand-mark.small { width: 32px; height: 32px; font-size: 16px; }
+.eyebrow { margin: 0 0 8px; color: #487d78; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.login-panel h1, .page-heading h2 { margin: 0; color: #152431; letter-spacing: 0; }
+.login-panel h1 { font-size: 30px; }
+.login-copy, .muted { color: #71818d; }
+.login-copy { margin: 10px 0 30px; }
+.login-form { display: grid; gap: 18px; }
+.login-form label, .settings label { display: grid; gap: 8px; color: #445560; font-size: 13px; font-weight: 700; }
+input, select { width: 100%; min-height: 42px; border: 1px solid #cddbd7; background: #fff; color: #17222f; padding: 0 12px; outline: none; }
+input:focus, select:focus { border-color: #25847c; box-shadow: 0 0 0 3px rgba(37, 132, 124, .12); }
+.primary-button, .secondary-button { min-height: 42px; padding: 0 18px; border: 0; font-weight: 750; }
+.primary-button { background: #176b66; color: white; }
+.primary-button:hover { background: #0f5753; }
+.secondary-button { color: #176b66; background: #e4f0ed; }
+.text-button { border: 0; background: transparent; color: #176b66; font-weight: 750; padding: 4px 0; }
+.form-error { margin: -4px 0 0; color: #b43e3e; font-size: 13px; }
+.login-hint { margin: 26px 0 0; color: #8b999f; font-size: 12px; }
+.app-shell { min-height: 100vh; display: flex; }
+.sidebar { width: 230px; flex: 0 0 230px; display: flex; flex-direction: column; padding: 24px 14px; background: #17333a; color: #d8e8e5; }
+.side-brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 30px; }
+.side-brand strong, .side-brand small { display: block; }
+.side-brand strong { color: white; font-size: 15px; }
+.side-brand small { margin-top: 3px; color: #91b0aa; font-size: 11px; }
+.sidebar nav, .sidebar-bottom { display: grid; gap: 5px; }
+.sidebar button { border: 0; background: transparent; color: #adc7c3; text-align: left; padding: 12px 14px; font-size: 14px; }
+.sidebar button:hover, .sidebar button.active { background: #28525a; color: white; }
+.sidebar-bottom { margin-top: auto; }
+.main-shell { min-width: 0; flex: 1; }
+.topbar { height: 68px; display: flex; align-items: center; justify-content: space-between; padding: 0 34px; border-bottom: 1px solid #dce5e4; background: #fff; }
+.breadcrumb { color: #52636c; font-size: 13px; }
+.breadcrumb span { margin: 0 8px; color: #a9b8b9; }
+.user-menu { display: flex; align-items: center; gap: 8px; color: #43545d; font-size: 13px; }
+.user-menu button { border: 0; background: transparent; color: #176b66; font-size: 13px; margin-left: 10px; }
+.online-dot { width: 8px; height: 8px; background: #3caf7b; border-radius: 50%; }
+.content { max-width: 1240px; margin: 0 auto; padding: 40px 44px 64px; }
+.page-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.page-heading h2 { font-size: 28px; }
+.page-heading .muted { margin: 8px 0 0; }
+.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+.metric-card, .surface { background: white; border: 1px solid #dce6e3; }
+.metric-card { padding: 20px; }
+.metric-card span, .metric-card small { display: block; color: #6e8088; font-size: 12px; }
+.metric-card strong { display: block; margin: 12px 0 6px; color: #17222f; font-size: 30px; }
+.metric-card .positive { color: #2d8b65; }
+.content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.surface { padding: 24px; }
+.section-heading { display: flex; justify-content: space-between; align-items: start; margin-bottom: 18px; }
+.section-heading h3 { margin: 0; font-size: 17px; }
+.alert-list, .order-list { display: grid; gap: 3px; }
+.alert-row, .order-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid #edf1f0; }
+.alert-row div:first-child, .order-row div:first-child { min-width: 0; }
+.alert-row strong, .alert-row span, .order-row strong, .order-row span { display: block; }
+.alert-row span, .order-row span { margin-top: 4px; color: #7b8b91; font-size: 12px; }
+.order-meta { text-align: right; }
+.order-meta b { display: block; margin-bottom: 5px; font-size: 13px; }
+.status-pill { display: inline-block; padding: 4px 8px; color: #52636a; background: #edf1f0; font-size: 11px; font-weight: 750; }
+.status-good { color: #237a58; background: #e4f4ec; }
+.status-warn { color: #a06920; background: #fff1d9; }
+.status-neutral { color: #a23d48; background: #fbe7e8; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.toolbar input { max-width: 360px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+th { color: #71818a; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+th, td { padding: 14px 12px; border-bottom: 1px solid #edf1f0; }
+td strong { color: #253a43; }
+.settings { max-width: 680px; display: grid; gap: 22px; }
+.toggle-row { display: flex !important; grid-template-columns: 1fr auto; align-items: center; justify-content: space-between; padding-top: 14px; border-top: 1px solid #edf1f0; }
+.toggle-row small { display: block; margin-top: 5px; color: #7b8b91; font-weight: 400; }
+.toggle-row input { width: 40px; min-height: 22px; accent-color: #176b66; }
+@media (max-width: 1080px) { body { min-width: 760px; } .sidebar { width: 190px; flex-basis: 190px; } .content { padding-inline: 26px; } .metric-grid { grid-template-columns: repeat(2, 1fr); } }
