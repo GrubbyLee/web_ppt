@@ -170,6 +170,31 @@ try {
   await sidepanel.waitForSelector("text=业务页就绪", { timeout: 10_000 });
   assert(true, "敏感输入消失后自动恢复就绪（观众封面解除）");
 
+  console.log("5c) 标注期间禁止选中业务页元素");
+  const dragOverHeading = async () => {
+    await businessPage.evaluate(() => window.getSelection()?.removeAllRanges());
+    const heading = await businessPage.locator("h1").first().boundingBox();
+    await businessPage.mouse.move(heading.x + 4, heading.y + heading.height / 2);
+    await businessPage.mouse.down();
+    // 斜向拖动：既穿过标题文字，也有实际尺寸（水平拖动高度为 0，会被正确拒绝）。
+    await businessPage.mouse.move(heading.x + heading.width - 4, heading.y + heading.height + 150, { steps: 6 });
+    await businessPage.mouse.up();
+    await sidepanel.waitForTimeout(500);
+    return businessPage.evaluate(() => String(window.getSelection() ?? "").length);
+  };
+  const circleTool = sidepanel.locator(".panel-page__tools").getByTitle("圈选标注（C）");
+  const beforeLen = await dragOverHeading();
+  assert(beforeLen > 0, `未启用标注工具时可以正常选中文本（${beforeLen} 字）`);
+  await circleTool.click();
+  await sidepanel.waitForTimeout(500);
+  const lockedLen = await dragOverHeading();
+  assert(lockedLen === 0, `圈选划过标题时不产生文本选区（选中 ${lockedLen} 字）`);
+  assert(await businessPage.locator("[data-showit-overlay] .showit-circle").count() === 1, "同一笔仍然画出了圆圈");
+  await circleTool.click();
+  await sidepanel.waitForTimeout(500);
+  const restoredLen = await dragOverHeading();
+  assert(restoredLen > 0, `关闭标注工具后恢复可选中（${restoredLen} 字）`);
+
   console.log("6) 观众窗口与画面授权");
   await sidepanel.getByTitle("共享画面").or(sidepanel.locator("button", { hasText: "共享画面" })).first().click({ timeout: 3_000 }).catch(async () => {
     await sidepanel.locator(".panel-group--deliver").getByText("共享画面").click();
