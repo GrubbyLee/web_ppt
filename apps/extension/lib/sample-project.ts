@@ -596,6 +596,7 @@ export const sampleProject: Project = {
     { key: "demoPassword", label: "演示账号密码", description: "云枢演示控制台的登录密码，仅在演示期间存在于浏览器内存。", required: true, expiresAfterMinutes: 60 }
   ],
   brand: {
+    maskTitle: "敏感信息遮挡，马上回来～",
     primaryColor: "#37d0ba",
     statusBackgroundColor: "#172533",
     privacyMessage: "演示准备中",

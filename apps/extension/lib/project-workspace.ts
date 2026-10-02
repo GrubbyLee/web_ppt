@@ -223,6 +223,7 @@ export function createProject(name: string): Project {
     brand: {
       primaryColor: "#37d0ba",
       statusBackgroundColor: "#172533",
+      maskTitle: "敏感信息遮挡，马上回来～",
       privacyMessage: "演示准备中",
       loadingMessage: "正在准备业务画面",
       offlineLabel: "离线备用",
