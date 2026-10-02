@@ -92,6 +92,11 @@ try {
     await sidepanel.locator(".panel-page__tools").getByTitle(/^撤销最后一个标注/).click();
     await sidepanel.waitForTimeout(700);
     assert(await coverPage.locator("[data-showit-overlay] .showit-circle").count() === 0, "舞台页标注可以撤销");
+    // 章节页/封面页没有业务数据：点遮罩必须给出可见提示，不能默默无反应。
+    await sidepanel.locator(".panel-page__tools").getByTitle("框选隐私遮罩元素").click();
+    await sidepanel.waitForTimeout(800);
+    const stageNotice = await sidepanel.locator(".panel-message").textContent().catch(() => null);
+    assert(Boolean(stageNotice), `封面页点遮罩给出可见提示（${stageNotice ?? "无"}）`);
   }
 
   console.log("2b) 演示中再次运行：项目库隐藏且不残留会话标签");
@@ -117,6 +122,13 @@ try {
   await demoPage.waitForSelector("[data-testid=login-card]", { timeout: 8_000 });
   await sidepanel.waitForSelector("text=未登录", { timeout: 8_000 });
   assert(true, "侧边栏显示未登录（连接器状态）");
+
+  // 遮罩是给观众用的：演示者在这里框选要挡住的区域。内置演示页也必须支持。
+  await sidepanel.locator(".panel-page__tools").getByTitle("框选隐私遮罩元素").click();
+  await demoPage.locator("[data-testid=login-username]").click();
+  await sidepanel.waitForTimeout(1_200);
+  const maskCount = await demoPage.locator("[data-showit-overlay] .showit-mask").count();
+  assert(maskCount === 1, `演示页上可以框选隐私遮罩（${maskCount} 个）`);
 
   console.log("4) 登录步骤链（账号 → 敏感密码 → 登录）");
   const stepButton = (index) => sidepanel.locator(".panel-steps__list .panel-step").nth(index);
