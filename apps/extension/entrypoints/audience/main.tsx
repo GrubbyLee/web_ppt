@@ -5,7 +5,7 @@ import { browser } from "wxt/browser";
 import type { BgMessage, BroadcastState, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 import { OfflineFallbackView } from "@/components/OfflineFallbackView";
-import { MASK_MASCOT_SVG, OVERLAY_STYLE } from "@/lib/dom-connector";
+import { MASK_MASCOT_DATA_URL, OVERLAY_STYLE } from "@/lib/dom-connector";
 import { DemoConsole } from "@/lib/demo/DemoConsole";
 import { demoViewFromUrl } from "@/lib/demo/views";
 import "@/components/ui.css";
@@ -191,7 +191,9 @@ function AudienceApp() {
             <span>{brand?.privacyMessage ?? "画面已保护"}</span>
           ) : screenMode === "mask" ? (
             <div className="showit-mask-page">
-              <div className="showit-mascot" dangerouslySetInnerHTML={{ __html: MASK_MASCOT_SVG }} />
+              <div className="showit-mascot">
+                <img className="showit-mask-image" src={brand?.maskImageDataUrl ?? MASK_MASCOT_DATA_URL} alt="" />
+              </div>
               <p className="showit-mask-title">{brand?.maskTitle ?? "敏感信息遮挡，马上回来～"}</p>
             </div>
           ) : null}

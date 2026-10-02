@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import type { Browser } from "wxt/browser";
 import { createAudienceCompositor, sanitizeAudienceMasks, type CompositorState } from "@/lib/compositor";
+import { MASK_MASCOT_DATA_URL } from "@/lib/dom-connector";
 import type { BgMessage, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 
@@ -26,7 +27,8 @@ function readState(): CompositorState {
     screenMode: latest.screenMode,
     offlineFallbackActive: latest.offlineFallbackActive || latest.captureUnsafe,
     privacyMasks: latest.privacyMasks,
-    maskTitle: latest.maskTitle
+    maskTitle: latest.maskTitle,
+    maskImage: latest.maskImage
   };
 }
 
@@ -197,6 +199,7 @@ function connectPort(): void {
         offlineFallbackActive: machine.session.offlineFallbackPageId !== null && machine.session.offlineFallbackPageId === page?.id,
         privacyMasks: sanitizeAudienceMasks(page?.privacyMasks ?? []),
         maskTitle: machine.project.brand.maskTitle,
+        maskImage: machine.project.brand.maskImageDataUrl ?? MASK_MASCOT_DATA_URL,
         // Blocked = sensitive inputs (password/MFA/file) or origin mismatch —
         // the audience must never watch credentials being entered.
         captureUnsafe: message.state.meta.tabUnsafeOrigin === true || message.state.meta.connectorState?.state === "blocked"

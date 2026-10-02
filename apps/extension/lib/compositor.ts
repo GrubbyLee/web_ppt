@@ -14,7 +14,25 @@ export type CompositorState = {
   privacyMasks?: unknown;
   /** 遮挡封面文案：远程观众看到的是合成后的视频，所以文案要在画面里画出来。 */
   maskTitle?: string | undefined;
+  /** 遮挡封面吉祥物（data URL）：优先画它，画不出来才用简化的人物图形兜底。 */
+  maskImage?: string | undefined;
 };
+
+/** 缓存吉祥物图片：合成器每帧只读，不重复解码。 */
+let maskImageElement: HTMLImageElement | null = null;
+let maskImageSource: string | null = null;
+function readyMascot(source: string | undefined, documentRef: Document): HTMLImageElement | null {
+  if (!source) return null;
+  if (maskImageSource !== source) {
+    maskImageSource = source;
+    const image = documentRef.createElement("img");
+    image.decoding = "sync";
+    image.src = source;
+    maskImageElement = image;
+  }
+  const image = maskImageElement;
+  return image && image.complete && image.naturalWidth > 0 ? image : null;
+}
 
 function clamp(value: number): number {
   return Math.max(0, Math.min(1, Number(value)));
@@ -43,7 +61,7 @@ export function resolveAudienceFrameMode(state: CompositorState | null | undefin
 }
 
 /** 在合成画面里画遮挡页：会动的小人 + 文案，避免观众盯着一块死板的色块。 */
-function paintMaskScene(context: CanvasRenderingContext2D, title: string, width: number, height: number): void {
+function paintMaskScene(context: CanvasRenderingContext2D, state: CompositorState | null | undefined, title: string, width: number, height: number, documentRef: Document): void {
   context.filter = "none";
   const gradient = context.createLinearGradient(0, 0, width, height);
   gradient.addColorStop(0, "#12202b");
@@ -54,6 +72,19 @@ function paintMaskScene(context: CanvasRenderingContext2D, title: string, width:
   const unit = Math.min(width, height);
   // 用时间驱动上下浮动：合成器以 30fps 连续重绘，所以这就是动画。
   const bob = Math.sin(Date.now() / 320) * (unit * 0.02);
+
+  const mascot = readyMascot(state?.maskImage, documentRef);
+  if (mascot) {
+    const size = unit * 0.42;
+    context.drawImage(mascot, width / 2 - size / 2, height / 2 - size / 2 - unit * 0.08 + bob, size, size);
+    context.fillStyle = "#e9eff4";
+    context.font = `600 ${Math.round(unit * 0.045)}px system-ui, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(title || "敏感信息遮挡，马上回来～", width / 2, height / 2 + size / 2 + unit * 0.05, width * 0.86);
+    return;
+  }
+
   const radius = unit * 0.11;
   const centerX = width / 2;
   const centerY = height / 2 - unit * 0.08 + bob;
@@ -170,7 +201,7 @@ export function createAudienceCompositor(
       if (previousMode !== "frozen") frozenContext.drawImage(canvas, 0, 0, width, height);
       context.drawImage(frozen, 0, 0, width, height);
     } else if (mode === "mask") {
-      paintMaskScene(context, state?.maskTitle ?? "", width, height);
+      paintMaskScene(context, state, state?.maskTitle ?? "", width, height, documentRef);
     } else if (mode === "normal" && video.readyState >= 2) {
       context.filter = "none";
       context.drawImage(video, 0, 0, width, height);
