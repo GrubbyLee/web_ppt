@@ -92,11 +92,14 @@ try {
     await sidepanel.locator(".panel-page__tools").getByTitle(/^撤销最后一个标注/).click();
     await sidepanel.waitForTimeout(700);
     assert(await coverPage.locator("[data-showit-overlay] .showit-circle").count() === 0, "舞台页标注可以撤销");
-    // 章节页/封面页没有业务数据：点遮罩必须给出可见提示，不能默默无反应。
-    await sidepanel.locator(".panel-page__tools").getByTitle("框选隐私遮罩元素").click();
-    await sidepanel.waitForTimeout(800);
-    const stageNotice = await sidepanel.locator(".panel-message").textContent().catch(() => null);
-    assert(Boolean(stageNotice), `封面页点遮罩给出可见提示（${stageNotice ?? "无"}）`);
+    // 遮罩是整屏开关（与圈选/撤销无关），封面页同样生效。
+    const coverMaskButton = sidepanel.locator(".panel-page__tools").getByTitle(/遮挡画面|恢复画面/);
+    await coverMaskButton.click();
+    await sidepanel.waitForTimeout(900);
+    assert(await coverPage.locator(".showit-mask-page").count() === 1, "封面页也能开启遮挡封面");
+    await coverMaskButton.click();
+    await sidepanel.waitForTimeout(900);
+    assert(await coverPage.locator(".showit-mask-page").count() === 0, "再点一次恢复封面页");
   }
 
   console.log("2b) 演示中再次运行：项目库隐藏且不残留会话标签");
@@ -124,7 +127,10 @@ try {
   assert(true, "侧边栏显示未登录（连接器状态）");
 
   // 遮罩是给观众用的：演示者在这里框选要挡住的区域。内置演示页也必须支持。
-  const pickMask = sidepanel.locator(".panel-page__tools").getByTitle(/^框选隐私遮罩元素/);
+  // 长期区域遮挡（会写入项目）：入口在「更多」里，与整屏「遮罩」开关无关。
+  await sidepanel.locator(".panel-group--deliver").getByText("更多").click();
+  await sidepanel.waitForTimeout(600);
+  const pickMask = sidepanel.locator(".panel-group--deliver").getByTitle(/^点选页面元素/);
   await pickMask.click();
   await sidepanel.waitForTimeout(700);
   assert((await sidepanel.locator(".panel-message").textContent().catch(() => "") ?? "").includes("点击要遮挡的元素"),
@@ -134,8 +140,8 @@ try {
   const maskCount = await demoPage.locator("[data-showit-overlay] .showit-mask").count();
   assert(maskCount === 1, `演示页上可以框选隐私遮罩（${maskCount} 个）`);
   // 遮罩会写回项目：必须能在演示中清除误框的那些。
-  const clearMask = sidepanel.locator(".panel-page__tools").getByTitle(/^清除本页/);
-  assert(await clearMask.isVisible(), "本页有遮罩时出现「清除遮罩」按钮");
+  const clearMask = sidepanel.locator(".panel-group--deliver").getByTitle(/^清除本页/);
+  assert(await clearMask.isVisible(), "本页有长期遮挡区域时出现「清除区域」按钮");
   await clearMask.click();
   await sidepanel.waitForTimeout(900);
   assert(await demoPage.locator("[data-showit-overlay] .showit-mask").count() === 0, "清除后本页遮罩为空");
@@ -272,6 +278,20 @@ try {
     assert(Boolean(badge?.includes("13 / 18")), `观众角标与当前页同步：${badge?.replace(/\s+/g, " ")}`);
     await audiencePage.screenshot({ path: resolve(resultsDir, "demo-e2e-audience.png") });
   }
+
+  console.log("8c) 遮挡封面（遮罩）");
+  const maskButton = sidepanel.locator(".panel-page__tools").getByTitle(/遮挡画面|恢复画面/);
+  await maskButton.click();
+  await sidepanel.waitForTimeout(900);
+  const maskTitle = await demoPage.locator(".showit-mask-title").textContent().catch(() => null);
+  assert((maskTitle ?? "").includes("敏感信息遮挡"), `演示页显示默认遮挡页（${maskTitle}）`);
+  assert(await demoPage.locator(".showit-mascot-svg").count() === 1, "遮挡页带卡通人物");
+  const mascotAnimation = await demoPage.locator(".showit-mascot-body").evaluate((node) => getComputedStyle(node).animationName).catch(() => "");
+  assert(mascotAnimation === "showit-mascot-float", `卡通人物在动（animation=${mascotAnimation}）`);
+  assert(await audiencePage.locator(".showit-mask-page").count() === 1, "观众页同步显示遮挡页");
+  await maskButton.click();
+  await sidepanel.waitForTimeout(900);
+  assert(await demoPage.locator(".showit-mask-page").count() === 0, "再点一次恢复画面");
 
   console.log("9) 离线备用");
   const navPrev = sidepanel.locator(".panel-page-nav").getByTitle("上一页");
