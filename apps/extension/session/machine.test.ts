@@ -19,12 +19,36 @@ describe("session machine", () => {
     state = applyAction(state, action).state;
   };
 
-  it("moves to a new page and clears page-local annotations", () => {
+  it("moves to a new page and hides the previous page's annotations", () => {
     run({ type: "add-circle", circle: { id: "circle-test", x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.4 } });
     run({ type: "set-active-page", index: 2 });
     expect(state.session.currentPageIndex).toBe(2);
     expect(state.session.circles).toEqual([]);
     expect(state.session.annotationTool).toBe("none");
+  });
+
+  it("restores a page's annotations when navigating back to it", () => {
+    run({ type: "add-circle", circle: { id: "c1", x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.4 } });
+    run({ type: "add-circle", circle: { id: "c2", x1: 0.2, y1: 0.2, x2: 0.5, y2: 0.5 } });
+    run({ type: "set-active-page", index: 2 });
+    expect(state.session.circles).toEqual([]);
+    run({ type: "set-active-page", index: 0 });
+    expect(state.session.circles.map((circle) => circle.id)).toEqual(["c1", "c2"]);
+  });
+
+  it("undoes annotations one by one in reverse order", () => {
+    run({ type: "add-circle", circle: { id: "c1", x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.4 } });
+    run({ type: "add-circle", circle: { id: "c2", x1: 0.2, y1: 0.2, x2: 0.5, y2: 0.5 } });
+    run({ type: "add-circle", circle: { id: "c3", x1: 0.3, y1: 0.3, x2: 0.6, y2: 0.6 } });
+    run({ type: "undo-annotation" });
+    expect(state.session.circles.map((circle) => circle.id)).toEqual(["c1", "c2"]);
+    // 撤销不关闭圈选工具：可以接着画，也可以接着撤销。
+    run({ type: "set-annotation-tool", tool: "circle" });
+    run({ type: "undo-annotation" });
+    expect(state.session.circles.map((circle) => circle.id)).toEqual(["c1"]);
+    expect(state.session.annotationTool).toBe("circle");
+    run({ type: "undo-annotation" });
+    expect(state.session.circles).toEqual([]);
   });
 
   it("activates offline fallback only for the current page and clears it when navigating", () => {

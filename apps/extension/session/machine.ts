@@ -48,7 +48,8 @@ export type SessionAction =
   | { type: "add-privacy-mask"; mask: PrivacyMask }
   | { type: "update-privacy-mask"; maskId: string; bounds: Pick<PrivacyMask, "x1" | "y1" | "x2" | "y2"> }
   | { type: "clear-privacy-masks" }
-  | { type: "clear-annotations" }
+  /** 撤销最后一个标注：可以连续点击，按画的顺序倒序清除。 */
+  | { type: "undo-annotation" }
   | { type: "audience-ready" }
   | { type: "set-audience-count"; count: number }
   | { type: "audience-disconnected" }
@@ -56,6 +57,18 @@ export type SessionAction =
   | { type: "end-presentation" };
 
 export type ApplyResult = { state: MachineState; rehearsal?: Rehearsal };
+
+/** 把标注按当前页写回 circlesByPage，并同步当前显示用的 circles。 */
+function withPageCircles(
+  state: MachineState,
+  session: PresentationSession,
+  circles: Circle[],
+  pageId?: string | undefined
+): PresentationSession {
+  const target = pageId ?? state.project.pages[session.currentPageIndex]?.id;
+  if (!target) return { ...session, circles };
+  return { ...session, circles, circlesByPage: { ...session.circlesByPage, [target]: circles } };
+}
 
 function withSequence(session: PresentationSession, changes: Partial<PresentationSession>): PresentationSession {
   return {
@@ -160,7 +173,8 @@ function moveResult(state: MachineState, settled: PresentationSession, targetInd
         timerStartedAt: settled.timerStatus === "running" ? Date.now() : null,
         autoAdvanceElapsedMs: 0,
         autoAdvanceStartedAt: null,
-        circles: [],
+        // 标注按页保存：翻到目标页时显示那一页画过的，翻回来还能看到。
+        circles: settled.circlesByPage[targetPage?.id ?? ""] ?? [],
         laser: null,
         annotationTool: "none",
         offlineFallbackPageId: null,
@@ -337,7 +351,8 @@ export function applyAction(input: MachineState, action: SessionAction, now = Da
               timerStartedAt: settled.timerStatus === "running" ? now : null,
               autoAdvanceElapsedMs: 0,
               autoAdvanceStartedAt: null,
-              circles: [],
+              // 同上：退回上一页时恢复那一页的标注。
+              circles: settled.circlesByPage[targetPage.id] ?? [],
               laser: null,
               annotationTool: "none",
               offlineFallbackPageId: null,
@@ -418,6 +433,7 @@ export function applyAction(input: MachineState, action: SessionAction, now = Da
             screenMode: "normal",
             annotationTool: "none",
             circles: [],
+            circlesByPage: {},
             laser: null,
             offlineFallbackPageId: null,
             offlineNetworkGrants: [],
@@ -530,8 +546,10 @@ export function applyAction(input: MachineState, action: SessionAction, now = Da
       return { state: { ...input, session: withSequence(input.session, { annotationTool: action.tool }) } };
     case "set-laser":
       return { state: { ...input, session: withSequence(input.session, { laser: action.laser }) } };
-    case "add-circle":
-      return { state: { ...input, session: withSequence(input.session, { circles: [...input.session.circles, action.circle] }) } };
+    case "add-circle": {
+      const circles = [...input.session.circles, action.circle];
+      return { state: { ...input, session: withSequence(withPageCircles(input, input.session, circles), { circles }) } };
+    }
     case "add-privacy-mask":
       return {
         state: {
@@ -571,8 +589,16 @@ export function applyAction(input: MachineState, action: SessionAction, now = Da
           presenterEdits: markPageEdit(input, "masks")
         }
       };
-    case "clear-annotations":
-      return { state: { ...input, session: withSequence(input.session, { circles: [], laser: null, annotationTool: "none" }) } };
+    case "undo-annotation": {
+      // 倒序撤销：一次去掉最后画的一个，保留圈选工具以便继续画/继续撤销。
+      const circles = input.session.circles.slice(0, -1);
+      return {
+        state: {
+          ...input,
+          session: withSequence(withPageCircles(input, input.session, circles), { circles, laser: null })
+        }
+      };
+    }
     case "audience-ready":
       return {
         state: {
@@ -620,6 +646,8 @@ export function applyAction(input: MachineState, action: SessionAction, now = Da
             autoAdvanceStartedAt: null,
             screenMode: "ended",
             annotationTool: "none",
+            circles: [],
+            circlesByPage: {},
             laser: null,
             // Offline network grants are per-run consent — do not leave origins
             // pre-authorized for the next presentation or rehearsal.

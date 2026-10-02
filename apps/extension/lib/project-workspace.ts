@@ -257,6 +257,7 @@ export function createSession(project: Project): PresentationSession {
     browserSessionMode: project.browserSessionMode,
     annotationTool: "none",
     circles: [],
+    circlesByPage: {},
     laser: null,
     audienceStatus: "disconnected",
     audienceCount: 0,

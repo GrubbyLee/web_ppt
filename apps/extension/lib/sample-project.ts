@@ -735,6 +735,7 @@ export const sampleSession: PresentationSession = {
   browserSessionMode: "daily",
   annotationTool: "none",
   circles: [],
+  circlesByPage: {},
   laser: null,
   audienceStatus: "disconnected",
   audienceCount: 0,

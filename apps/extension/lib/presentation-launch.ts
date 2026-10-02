@@ -69,6 +69,10 @@ export function applyProjectToPresentation(workspace: Workspace, latestProject: 
     offlineNetworkGrants: workspace.session.offlineNetworkGrants.filter((grant) => validPageIds.has(grant.pageId)),
     annotationTool: stayedOnPage ? workspace.session.annotationTool : "none",
     circles: stayedOnPage ? workspace.session.circles : [],
+    // 页面被删除后，它画过的标注也要一并丢弃。
+    circlesByPage: Object.fromEntries(
+      Object.entries(workspace.session.circlesByPage).filter(([pageId]) => validPageIds.has(pageId))
+    ),
     laser: stayedOnPage ? workspace.session.laser : null,
     sequence: workspace.session.sequence + 1
   };

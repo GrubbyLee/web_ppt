@@ -38,10 +38,10 @@ import {
   Plus,
   Settings,
   Snowflake,
-  Square,
   Sun,
   Timer,
-  TriangleAlert
+  TriangleAlert,
+  Undo2
 } from "lucide-react";
 
 type DialogKind = "high-risk" | "force-complete" | "secrets" | "offline-origin" | "rehearsal-note" | "relay" | "settings" | "shortcuts" | null;
@@ -370,7 +370,13 @@ export function App() {
         <div className="panel-page__tools" role="toolbar" aria-label="页面工具">
           <ToolbarButton icon={<CircleDot size={16} />} label="激光笔" title="激光笔（L）" active={session.annotationTool === "laser"} onClick={() => act({ type: "set-annotation-tool", tool: session.annotationTool === "laser" ? "none" : "laser" })} />
           <ToolbarButton icon={<FlaskConical size={16} />} label="圈选" title="圈选标注（C）" active={session.annotationTool === "circle"} onClick={() => act({ type: "set-annotation-tool", tool: session.annotationTool === "circle" ? "none" : "circle" })} />
-          <ToolbarButton icon={<Square size={16} />} label="清除" title="清除本页标注" onClick={() => act({ type: "clear-annotations" })} />
+          <ToolbarButton
+            icon={<Undo2 size={16} />}
+            label="撤销"
+            title="撤销最后一个标注：可连续点击，按圈选顺序倒序清除"
+            disabled={!session.circles.length}
+            onClick={() => act({ type: "undo-annotation" })}
+          />
           <ToolbarButton icon={<Eraser size={16} />} label="遮罩" title="框选隐私遮罩元素" onClick={() => send({ type: "pick-mask" })} />
           <ToolbarButton icon={<TriangleAlert size={16} />} label={offlineActive ? "返回业务" : "离线备用"} title={offlineActive ? "返回业务页面" : "切换离线备用"} active={offlineActive} disabled={!page.offline && !offlineActive} onClick={() => act({ type: "set-offline-fallback-active", active: !offlineActive })} />
         </div>
@@ -490,7 +496,7 @@ export function App() {
           <span className="panel-group__title">画面与投送</span>
           <div className="panel-group__actions">
             <ToolbarButton icon={<TriangleAlert size={16} />} label="隐私遮挡" title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
-            <ToolbarButton icon={<MonitorPlay size={16} />} label="共享画面" title="共享画面：打开只读画面窗口，用于视频会议共享或第二显示器预览（观众不看本机）" onClick={() => send({ type: "open-audience" })} />
+            <ToolbarButton icon={<MonitorPlay size={16} />} label="共享画面" title="视频会议共享源：打开只读画面窗口，会议里只共享这个窗口（不含控制台）；观众也可改用远程链接在自己浏览器观看" onClick={() => send({ type: "open-audience" })} />
             <ToolbarButton icon={moreOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />} label={moreOpen ? "收起" : "更多"} title="更多画面控制与投送方式" active={moreOpen} onClick={() => setMoreOpen(!moreOpen)} />
           </div>
           {moreOpen ? (

@@ -418,6 +418,9 @@ export const PresentationSessionSchema = z.object({
   browserSessionMode: BrowserSessionModeSchema.default("daily"),
   annotationTool: z.enum(["none", "laser", "circle", "mask"]),
   circles: z.array(CircleSchema),
+  /** 每一页画过的标注，按页保存：翻页时当前页的标注让位给目标页，
+   *  翻回来时又出现（演示中来回讲解同一页时不应丢失）。 */
+  circlesByPage: z.record(z.string(), z.array(CircleSchema).max(30)).default({}),
   laser: LaserPointSchema.nullable(),
   audienceStatus: AudienceStatusSchema,
   audienceCount: z.number().int().nonnegative().max(20),
