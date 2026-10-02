@@ -5,30 +5,64 @@ import type { Browser } from "wxt/browser";
 import type { BgMessage, BroadcastState, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 import { OfflineFallbackView } from "@/components/OfflineFallbackView";
+import { attachAnnotationLayer, createOverlayRenderer, makeCircleId } from "@/lib/dom-connector";
 import "@/components/ui.css";
 import "./stage.css";
 
+const overlayRenderer = createOverlayRenderer();
+let annotationLayer: { detach(): void; cancel(): void } | null = null;
+
+/**
+ * 舞台页（固定页 / 章节页）的标注也走覆盖层渲染，与业务页、内置演示页共用同一套
+ * 圆点、遮罩与激光笔样式，不再各自画一份。
+ *
+ * 封面、隐私、结束等整屏遮罩仍由 React 渲染（结束页要显示品牌 Logo），所以这里只在
+ * 正常画面时交给覆盖层，避免两层遮罩叠加。
+ */
+function renderStageOverlay(state: BroadcastState): void {
+  const machine = state.machine;
+  const page = machine.project.pages[machine.session.currentPageIndex] ?? null;
+  const offline = Boolean(page && machine.session.offlineFallbackPageId === page.id);
+  if (machine.session.screenMode !== "normal" || offline) {
+    overlayRenderer.render(null);
+    return;
+  }
+  overlayRenderer.render({
+    screenMode: "normal",
+    privacyMessage: machine.project.brand.privacyMessage,
+    privacyMasks: (page?.privacyMasks ?? []).map((mask) => ({ id: mask.id, x1: mask.x1, y1: mask.y1, x2: mask.x2, y2: mask.y2, mode: mask.mode })),
+    circles: machine.session.circles
+  });
+}
+
 function StageApp() {
   const [state, setState] = useState<BroadcastState | null>(null);
-  const laserRef = useRef<HTMLDivElement>(null);
-  const laserExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const portRef = useRef<Browser.runtime.Port | null>(null);
-  const circleDraft = useRef<{ startX: number; startY: number; element: HTMLDivElement } | null>(null);
   const toolRef = useRef<string>("none");
+  const laserSentAt = useRef(0);
+  const [portAttempt, setPortAttempt] = useState(0);
 
   useEffect(() => {
     const port = browser.runtime.connect({ name: `${PORT_PREFIX}stage` });
     portRef.current = port;
     port.onMessage.addListener((message: BgMessage) => {
       if (message.type === "state") {
-        toolRef.current = message.state.machine.session.annotationTool;
+        const nextTool = message.state.machine.session.annotationTool;
+        if (toolRef.current !== nextTool) annotationLayer?.cancel();
+        toolRef.current = nextTool;
         setState(message.state);
+        renderStageOverlay(message.state);
       }
+    });
+    port.onDisconnect.addListener(() => {
+      if (portRef.current === port) portRef.current = null;
+      // 后台 SW 被回收时端口会断开：不重连，页码、画面模式与标注都不再更新。
+      setTimeout(() => setPortAttempt((value) => value + 1), 500);
     });
     try {
       port.postMessage({ type: "hello", ctx: "stage" } satisfies UiMessage);
     } catch {
-      // Port closed; reload reconnects.
+      // 下一次重试会重新连上。
     }
     return () => {
       portRef.current = null;
@@ -38,97 +72,40 @@ function StageApp() {
         // Already disconnected.
       }
     };
-  }, []);
+  }, [portAttempt]);
 
-  const laserSentAt = useRef(0);
-
-  const onPointerMove = (event: React.PointerEvent) => {
-    if (toolRef.current !== "laser" || event.pointerType !== "mouse") return;
-    const dot = laserRef.current;
-    if (!dot) return;
-    const width = Math.max(1, window.innerWidth);
-    const height = Math.max(1, window.innerHeight);
-    const x = Math.max(0, Math.min(1, event.clientX / width));
-    const y = Math.max(0, Math.min(1, event.clientY / height));
-    dot.style.left = `${x * 100}%`;
-    dot.style.top = `${y * 100}%`;
-    dot.style.opacity = "1";
-    if (laserExpiry.current) clearTimeout(laserExpiry.current);
-    laserExpiry.current = setTimeout(() => {
-      dot.style.opacity = "0";
-    }, 1500);
-    // Relay to the audience windows at ~30Hz; business-page pointers travel
-    // inside the captured video, stage pages are not capturable.
-    const now = Date.now();
-    if (now - laserSentAt.current >= 33) {
-      laserSentAt.current = now;
-      try {
-        portRef.current?.postMessage({ type: "stage-laser", laser: { x, y, expiresAt: now + 1500 } } satisfies UiMessage);
-      } catch {
-        // Reload reconnects.
-      }
-    }
-  };
-
-  const onPointerDown = (event: React.PointerEvent) => {
-    if (toolRef.current !== "circle" || event.button !== 0) return;
-    const host = document.querySelector(".stage-annotations");
-    if (!host || (event.target instanceof HTMLElement && event.target.closest(".stage-annotation-draft"))) return;
-    const width = Math.max(1, window.innerWidth);
-    const height = Math.max(1, window.innerHeight);
-    const x = Math.max(0, Math.min(1, event.clientX / width));
-    const y = Math.max(0, Math.min(1, event.clientY / height));
-    const box = document.createElement("div");
-    box.className = "stage-annotation-circle stage-annotation-draft";
-    box.style.left = `${x * 100}%`;
-    box.style.top = `${y * 100}%`;
-    box.style.width = "0%";
-    box.style.height = "0%";
-    host.append(box);
-    circleDraft.current = { startX: x, startY: y, element: box };
-  };
-
-  const onPointerMoveCircle = (event: React.PointerEvent) => {
-    const draft = circleDraft.current;
-    if (!draft) return;
-    const width = Math.max(1, window.innerWidth);
-    const height = Math.max(1, window.innerHeight);
-    const x = Math.max(0, Math.min(1, event.clientX / width));
-    const y = Math.max(0, Math.min(1, event.clientY / height));
-    draft.element.style.left = `${Math.min(draft.startX, x) * 100}%`;
-    draft.element.style.top = `${Math.min(draft.startY, y) * 100}%`;
-    draft.element.style.width = `${Math.abs(x - draft.startX) * 100}%`;
-    draft.element.style.height = `${Math.abs(y - draft.startY) * 100}%`;
-  };
-
-  const onPointerUp = () => {
-    const draft = circleDraft.current;
-    if (!draft) return;
-    circleDraft.current = null;
-    const left = Number(draft.element.style.left!.slice(0, -1)) / 100;
-    const top = Number(draft.element.style.top!.slice(0, -1)) / 100;
-    const width = Number(draft.element.style.width!.slice(0, -1)) / 100;
-    const height = Number(draft.element.style.height!.slice(0, -1)) / 100;
-    draft.element.remove();
-    if (width < 0.01 || height < 0.01) return;
-    try {
-      portRef.current?.postMessage({
-        type: "action",
-        action: {
-          type: "add-circle",
-          circle: {
-            id: `circle-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-            x1: left,
-            y1: top,
-            x2: left + width,
-            y2: top + height
-          }
+  useEffect(() => {
+    const layer = attachAnnotationLayer({
+      isCircleTool: () => toolRef.current === "circle",
+      isLaserTool: () => toolRef.current === "laser",
+      addCircle: (circle) => {
+        try {
+          portRef.current?.postMessage({
+            type: "action",
+            action: { type: "add-circle", circle: { id: makeCircleId(), ...circle } }
+          } satisfies UiMessage);
+        } catch {
+          // Reload reconnects.
         }
-      } satisfies UiMessage);
-    } catch {
-      // Reload reconnects.
-    }
-  };
+      },
+      // 舞台页不可被捕获，激光点需要转发给观众窗口（约 30Hz）。
+      moveLaser: (point) => {
+        const now = Date.now();
+        if (now - laserSentAt.current < 33) return;
+        laserSentAt.current = now;
+        try {
+          portRef.current?.postMessage({ type: "stage-laser", laser: { x: point.x, y: point.y, expiresAt: now + 1500 } } satisfies UiMessage);
+        } catch {
+          // Reload reconnects.
+        }
+      }
+    }, overlayRenderer);
+    annotationLayer = layer;
+    return () => {
+      annotationLayer = null;
+      layer.detach();
+    };
+  }, []);
 
   const machine = state?.machine ?? null;
   const page = machine ? machine.project.pages[machine.session.currentPageIndex] ?? null : null;
@@ -146,7 +123,7 @@ function StageApp() {
   const brand = machine?.project.brand;
 
   return (
-    <main className="stage-root" style={{ "--brand": brand?.primaryColor ?? "#37d0ba" } as React.CSSProperties} onPointerMove={(event) => { onPointerMove(event); onPointerMoveCircle(event); }} onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
+    <main className="stage-root" style={{ "--brand": brand?.primaryColor ?? "#37d0ba" } as React.CSSProperties}>
       {screenMode === "black" ? <div className="stage-cover stage-cover--black" /> : null}
       {screenMode === "white" ? <div className="stage-cover stage-cover--white" /> : null}
       {screenMode === "privacy" ? (
@@ -197,24 +174,6 @@ function StageApp() {
           <h1>{page.title}</h1>
           <p>业务页面正在标签页中运行。此画面仅在业务页无法展示时出现。</p>
         </section>
-      ) : null}
-
-      {machine && screenMode === "normal" && !offlineActive ? (
-        <div className="stage-annotations" aria-hidden="true">
-          {machine.session.circles.map((circle) => (
-            <div
-              key={circle.id}
-              className="stage-annotation-circle"
-              style={{
-                left: `${Math.min(circle.x1, circle.x2) * 100}%`,
-                top: `${Math.min(circle.y1, circle.y2) * 100}%`,
-                width: `${Math.abs(circle.x2 - circle.x1) * 100}%`,
-                height: `${Math.abs(circle.y2 - circle.y1) * 100}%`
-              }}
-            />
-          ))}
-          <div ref={laserRef} className="stage-annotation-laser" />
-        </div>
       ) : null}
     </main>
   );

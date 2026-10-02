@@ -114,28 +114,5 @@
   height: 6px;
 }
 
-.stage-annotations {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 20;
-}
-
-.stage-annotation-circle {
-  position: absolute;
-  border: 4px solid var(--signal-amber);
-  border-radius: 50%;
-  box-shadow: 0 0 0 3px rgb(5 6 7 / 55%);
-}
-
-.stage-annotation-laser {
-  position: absolute;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--signal-red);
-  box-shadow: 0 0 20px 8px rgb(255 95 109 / 55%);
-  transform: translate(-50%, -50%);
-  opacity: 0;
-  transition: opacity 120ms linear;
-}
+/* 舞台页的圆圈与激光点已改用覆盖层渲染（与业务页、内置演示页一致），
+   这里不再保留一份独立的样式。 */
