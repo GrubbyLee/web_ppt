@@ -65,6 +65,8 @@ export function App() {
   // 按会话判定，而不是一次性标记：演示中再次运行另一个项目时也要重新隐藏项目库。
   const libraryAutoClosedRef = useRef<string | null>(null);
   const [relayBase, setRelayBase] = useState("");
+  // 后台回的错误提示：以前侧边栏只听 state，错误被静默丢弃，表现为按钮“点了没反应”。
+  const [notice, setNotice] = useState<string | null>(null);
   const [relayCopied, setRelayCopied] = useState(false);
   const portRef = useRef<Browser.runtime.Port | null>(null);
   const notesEditingRef = useRef(false);
@@ -96,6 +98,10 @@ export function App() {
       port.onMessage.addListener((message: BgMessage) => {
         if (message.type === "state") setState(message.state);
         if (message.type === "session-started") setLibraryOpen(false);
+        if (message.type === "error") {
+          setNotice(message.message);
+          setTimeout(() => setNotice((current) => (current === message.message ? null : current)), 8_000);
+        }
       });
       port.onDisconnect.addListener(() => {
         if (portRef.current === port) portRef.current = null;
@@ -447,7 +453,7 @@ export function App() {
         </div>
       </section>
 
-      {meta.message ? <output className="panel-message">{meta.message}</output> : null}
+      {meta.message ?? notice ? <output className="panel-message">{meta.message ?? notice}</output> : null}
 
       <footer className="panel-footer">
         <div className="panel-timers">

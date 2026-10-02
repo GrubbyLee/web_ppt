@@ -1428,8 +1428,16 @@ export default defineBackground(() => {
         handleExecuteStep(message.stepId, message.confirmed === true);
         return;
       case "pick-mask": {
-        if (!machine || runtime.sessionTabId === null || runtime.tabKind !== "business") {
-          port.postMessage({ type: "error", message: "只有业务页面可以框选遮罩。" });
+        // 业务页与内置演示页都实现了遮罩拾取（showit-pick-privacy-mask）；只有舞台页
+        // （章节页 / 封面页 / 结束页）没有业务数据，无法框选。
+        const maskKind = runtime.tabKind;
+        if (!machine || runtime.sessionTabId === null || (maskKind !== "business" && maskKind !== "demo")) {
+          port.postMessage({
+            type: "error",
+            message: maskKind === "stage"
+              ? "当前是章节页 / 封面页，没有业务数据可遮挡。请切到业务页面后再框选遮罩。"
+              : "当前画面不支持框选遮罩。"
+          });
           return;
         }
         try {
