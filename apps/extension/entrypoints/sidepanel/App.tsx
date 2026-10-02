@@ -37,6 +37,7 @@ import {
   RotateCcw,
   Plus,
   Settings,
+  ShieldOff,
   Snowflake,
   Sun,
   Timer,
@@ -317,6 +318,7 @@ export function App() {
         <div className="panel-library">
           <Library port={libraryPort} embedded registerToolbar={registerToolbar} />
         </div>
+        {notice ? <output className="panel-message">{notice}</output> : null}
         {!libraryOpen ? (
           <section className="landing">
             <p>{machine ? (meta?.live ? "正在同步演示会话…" : "演示会话已恢复，但画面标签未连接。") : "从上方项目库选择一个项目并运行；演示开始后左侧就是业务系统画面。"}</p>
@@ -383,7 +385,11 @@ export function App() {
             disabled={!session.circles.length}
             onClick={() => act({ type: "undo-annotation" })}
           />
-          <ToolbarButton icon={<Eraser size={16} />} label="遮罩" title="框选隐私遮罩元素" onClick={() => send({ type: "pick-mask" })} />
+          <ToolbarButton icon={<Eraser size={16} />} label="遮罩" title="框选隐私遮罩元素：点击后在画面上点要遮挡的元素（Esc 取消）" onClick={() => send({ type: "pick-mask" })} />
+          {/* 遮罩会随退出演示写回项目，所以必须能在演示中删掉误框的那些。 */}
+          {page.privacyMasks.length > 0 ? (
+            <ToolbarButton icon={<ShieldOff size={16} />} label="清除遮罩" title={`清除本页 ${page.privacyMasks.length} 个隐私遮罩`} onClick={() => act({ type: "clear-privacy-masks" })} />
+          ) : null}
           <ToolbarButton icon={<TriangleAlert size={16} />} label={offlineActive ? "返回业务" : "离线备用"} title={offlineActive ? "返回业务页面" : "切换离线备用"} active={offlineActive} disabled={!page.offline && !offlineActive} onClick={() => act({ type: "set-offline-fallback-active", active: !offlineActive })} />
         </div>
       </section>

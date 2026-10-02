@@ -420,7 +420,11 @@ export const PresentationSessionSchema = z.object({
   circles: z.array(CircleSchema),
   /** 每一页画过的标注，按页保存：翻页时当前页的标注让位给目标页，
    *  翻回来时又出现（演示中来回讲解同一页时不应丢失）。 */
-  circlesByPage: z.record(z.string(), z.array(CircleSchema).max(30)).default({}),
+  circlesByPage: z
+    .record(z.string(), z.array(CircleSchema).max(30))
+    .default({})
+    // 页数上限是 200，标注分页不应超过它（导入的项目包可能塞入超大数据）。
+    .refine((value) => Object.keys(value).length <= 200, { message: "标注分页过多。" }),
   laser: LaserPointSchema.nullable(),
   audienceStatus: AudienceStatusSchema,
   audienceCount: z.number().int().nonnegative().max(20),

@@ -1440,9 +1440,13 @@ export default defineBackground(() => {
           });
           return;
         }
+        // 框选是一次“点谁挡谁”的异步交互：不说明下一步，演讲者只会觉得按钮没反应。
+        runtime.message = "请在画面上点击要遮挡的元素（Esc 取消）。";
+        broadcastState();
         try {
           const result = await browser.tabs.sendMessage(runtime.sessionTabId, { type: "showit-pick-privacy-mask" }) as { ok: boolean; locator?: Record<string, unknown>; bounds?: Record<string, number>; reason?: string };
           if (result?.ok && result.locator && result.bounds) {
+            runtime.message = null; // 清掉“请点击元素”的引导
             applyMachineAction({
               type: "add-privacy-mask",
               mask: {
@@ -1461,6 +1465,8 @@ export default defineBackground(() => {
           }
         } catch (error) {
           recordDiagnostic("选择隐私遮罩", error);
+          runtime.message = "框选遮罩失败：请确认已授权该站点，然后在画面上重试。";
+          broadcastState();
         }
         return;
       }
