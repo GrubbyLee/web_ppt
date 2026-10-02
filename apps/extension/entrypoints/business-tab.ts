@@ -2,12 +2,12 @@ import { browser } from "wxt/browser";
 import { defineUnlistedScript } from "wxt/utils/define-unlisted-script";
 import { probeConnectorSession } from "@/lib/connector-session";
 import {
+  attachAnnotationLayer,
   checkCondition,
   createOverlayRenderer,
   createRecorder,
   executeAction,
   makeCircleId,
-  normalizedPoint,
   pickMaskElement,
   resolvePrivacyMasks,
   type Locator
@@ -32,7 +32,7 @@ export default defineUnlistedScript(() => {
   let maskPickerCancel: (() => void) | null = null;
   let resourceFailureCount = 0;
   let resourceFailureTimer: ReturnType<typeof setTimeout> | null = null;
-  let circleDraft: { startX: number; startY: number; element: HTMLDivElement } | null = null;
+
 
   const overlayRenderer = createOverlayRenderer();
 
@@ -49,10 +49,7 @@ export default defineUnlistedScript(() => {
     overlay = next;
     if (previousTool !== overlay.annotationTool) {
       overlayRenderer.renderLaser(null);
-      if (overlay.annotationTool !== "circle" && circleDraft) {
-        circleDraft.element.remove();
-        circleDraft = null;
-      }
+      annotations.cancel();
     }
     overlayRenderer.render({
       screenMode: overlay.screenMode,
@@ -64,57 +61,19 @@ export default defineUnlistedScript(() => {
 
   // ---- pointer annotations (laser + circle drawing) -------------------------------
 
-  function annotationPointerMove(event: PointerEvent): void {
-    if (overlay?.annotationTool === "laser" && event.pointerType === "mouse") {
-      overlayRenderer.renderLaser(normalizedPoint(event));
+  // 与内置演示页共用同一份标注逻辑（激光笔 + 圈选），避免两处各自演化出缺陷。
+  const annotations = attachAnnotationLayer({
+    isCircleTool: () => overlay?.annotationTool === "circle",
+    isLaserTool: () => overlay?.annotationTool === "laser",
+    addCircle: (circle) => {
+      if (!overlay) return;
+      void browser.runtime.sendMessage({
+        type: "showit-circle-added",
+        sessionId: overlay.sessionId,
+        circle: { id: makeCircleId(), ...circle }
+      }).catch(() => undefined);
     }
-    if (circleDraft) {
-      const point = normalizedPoint(event);
-      const left = Math.min(circleDraft.startX, point.x);
-      const top = Math.min(circleDraft.startY, point.y);
-      circleDraft.element.style.left = `${left * 100}%`;
-      circleDraft.element.style.top = `${top * 100}%`;
-      circleDraft.element.style.width = `${Math.abs(point.x - circleDraft.startX) * 100}%`;
-      circleDraft.element.style.height = `${Math.abs(point.y - circleDraft.startY) * 100}%`;
-    }
-  }
-
-  function annotationPointerDown(event: PointerEvent): void {
-    if (overlay?.annotationTool !== "circle" || event.button !== 0 || event.target instanceof HTMLElement && event.target.closest("[data-showit-overlay]")) return;
-    const host = overlayRenderer.root();
-    if (!host) return;
-    const point = normalizedPoint(event);
-    const box = document.createElement("div");
-    box.className = "showit-circle";
-    box.style.left = `${point.x * 100}%`;
-    box.style.top = `${point.y * 100}%`;
-    box.style.width = "0%";
-    box.style.height = "0%";
-    host.append(box);
-    circleDraft = { startX: point.x, startY: point.y, element: box };
-  }
-
-  function annotationPointerUp(): void {
-    if (!circleDraft) return;
-    const draft = circleDraft;
-    circleDraft = null;
-    const left = Number(draft.element.style.left!.slice(0, -1)) / 100;
-    const top = Number(draft.element.style.top!.slice(0, -1)) / 100;
-    const width = Number(draft.element.style.width!.slice(0, -1)) / 100;
-    const height = Number(draft.element.style.height!.slice(0, -1)) / 100;
-    draft.element.remove();
-    if (width < 0.01 || height < 0.01) return;
-    if (!overlay) return;
-    void browser.runtime.sendMessage({
-      type: "showit-circle-added",
-      sessionId: overlay.sessionId,
-      circle: { id: makeCircleId(), x1: left, y1: top, x2: left + width, y2: top + height }
-    }).catch(() => undefined);
-  }
-
-  window.addEventListener("pointermove", annotationPointerMove, true);
-  window.addEventListener("pointerdown", annotationPointerDown, true);
-  window.addEventListener("pointerup", annotationPointerUp, true);
+  }, overlayRenderer);
 
   // ---- privacy risk detection ----------------------------------------------------
 

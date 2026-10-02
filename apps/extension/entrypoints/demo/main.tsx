@@ -5,12 +5,12 @@ import type { Browser } from "wxt/browser";
 import { DemoConsole } from "@/lib/demo/DemoConsole";
 import { appliedMutations, applyDemoMutation, readDemoSession, writeDemoSession, type DemoMutation, type DemoSession } from "@/lib/demo/data";
 import {
+  attachAnnotationLayer,
   checkCondition,
   createOverlayRenderer,
   createRecorder,
   executeAction,
   makeCircleId,
-  normalizedPoint,
   pickMaskElement,
   resolvePrivacyMasks,
   type Locator
@@ -37,8 +37,8 @@ void browser.tabs.getCurrent().then((tab) => {
 
 const overlayRenderer = createOverlayRenderer();
 let maskPickerCancel: (() => void) | null = null;
-let circleDraft: { startX: number; startY: number; element: HTMLDivElement } | null = null;
 let annotationTool: string = "none";
+let annotationLayer: { detach(): void; cancel(): void } | null = null;
 
 const recorder = createRecorder({
   send: (message) => {
@@ -85,6 +85,8 @@ function DemoApp() {
     port.onMessage.addListener((message: BgMessage) => {
       if (message.type === "state") {
         const machine = message.state.machine;
+        // 工具被切走时丢弃拖拽中的草稿。
+        if (annotationTool !== machine.session.annotationTool) annotationLayer?.cancel();
         annotationTool = machine.session.annotationTool;
         // Same reasoning as the audience mirror: the mutations live in module
         // state, so nudge a render after replaying them.
@@ -134,58 +136,21 @@ function DemoApp() {
   // ---- pointer annotations (laser + circle drawing) --------------------------
 
   useEffect(() => {
-    const onPointerMove = (event: PointerEvent) => {
-      if (annotationTool === "laser" && event.pointerType === "mouse") {
-        const point = normalizedPoint(event);
-        overlayRenderer.renderLaser(point);
+    // 与业务页注入脚本共用同一份标注逻辑（激光笔 + 圈选）。
+    const layer = attachAnnotationLayer({
+      isCircleTool: () => annotationTool === "circle",
+      isLaserTool: () => annotationTool === "laser",
+      addCircle: (circle) => {
+        post({ type: "action", action: { type: "add-circle", circle: { id: makeCircleId(), ...circle } } });
+      },
+      moveLaser: (point) => {
         post({ type: "stage-laser", laser: { x: point.x, y: point.y, expiresAt: Date.now() + 1500 } });
       }
-      if (circleDraft) {
-        const point = normalizedPoint(event);
-        const left = Math.min(circleDraft.startX, point.x);
-        const top = Math.min(circleDraft.startY, point.y);
-        circleDraft.element.style.left = `${left * 100}%`;
-        circleDraft.element.style.top = `${top * 100}%`;
-        circleDraft.element.style.width = `${Math.abs(point.x - circleDraft.startX) * 100}%`;
-        circleDraft.element.style.height = `${Math.abs(point.y - circleDraft.startY) * 100}%`;
-      }
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      if (annotationTool !== "circle" || event.button !== 0 || event.target instanceof HTMLElement && event.target.closest("[data-showit-overlay]")) return;
-      const host = overlayRenderer.root();
-      if (!host) return;
-      const point = normalizedPoint(event);
-      const box = document.createElement("div");
-      box.className = "showit-circle";
-      box.style.left = `${point.x * 100}%`;
-      box.style.top = `${point.y * 100}%`;
-      box.style.width = "0%";
-      box.style.height = "0%";
-      host.append(box);
-      circleDraft = { startX: point.x, startY: point.y, element: box };
-    };
-    const onPointerUp = () => {
-      if (!circleDraft) return;
-      const draft = circleDraft;
-      circleDraft = null;
-      const left = Number(draft.element.style.left!.slice(0, -1)) / 100;
-      const top = Number(draft.element.style.top!.slice(0, -1)) / 100;
-      const width = Number(draft.element.style.width!.slice(0, -1)) / 100;
-      const height = Number(draft.element.style.height!.slice(0, -1)) / 100;
-      draft.element.remove();
-      if (width < 0.01 || height < 0.01) return;
-      post({
-        type: "action",
-        action: { type: "add-circle", circle: { id: makeCircleId(), x1: left, y1: top, x2: left + width, y2: top + height } }
-      });
-    };
-    window.addEventListener("pointermove", onPointerMove, true);
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("pointerup", onPointerUp, true);
+    }, overlayRenderer);
+    annotationLayer = layer;
     return () => {
-      window.removeEventListener("pointermove", onPointerMove, true);
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("pointerup", onPointerUp, true);
+      annotationLayer = null;
+      layer.detach();
     };
   }, []);
 

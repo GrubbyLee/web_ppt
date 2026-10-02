@@ -273,6 +273,10 @@ export function createOverlayRenderer(documentRef: Document = document): {
   renderLaser(laser: { x: number; y: number } | null): void;
 } {
   let overlayRoot: HTMLDivElement | null = null;
+  // 样式元素必须留在闭包里：render() 每次都会重建子节点，若靠 querySelector 找回，
+  // 清空后再查永远拿不到 —— 结果是覆盖层样式丢失，所有标注变成没有样式的空 div，
+  // 表现为"激光笔看不到、圈选画不出"。
+  let overlayStyle: HTMLStyleElement | null = null;
   let laserExpiryTimer: ReturnType<typeof setTimeout> | null = null;
 
   function ensureOverlayRoot(): HTMLDivElement | null {
@@ -288,6 +292,7 @@ export function createOverlayRenderer(documentRef: Document = document): {
     } satisfies Partial<CSSStyleDeclaration>);
     const style = documentRef.createElement("style");
     style.textContent = OVERLAY_STYLE;
+    overlayStyle = style;
     host.append(style);
     (documentRef.documentElement ?? documentRef.body).append(host);
     overlayRoot = host;
@@ -297,9 +302,10 @@ export function createOverlayRenderer(documentRef: Document = document): {
   function render(state: OverlayShape | null): void {
     const host = ensureOverlayRoot();
     if (!host) return;
-    host.replaceChildren();
-    const style = host.querySelector("style");
-    if (style) host.append(style);
+    // 状态广播可能在拖拽途中到达：正在画的草稿不能被清掉，否则这一笔会丢。
+    const draft = host.querySelector<HTMLElement>(".showit-circle--draft");
+    host.replaceChildren(...(overlayStyle ? [overlayStyle] : []));
+    if (draft) host.append(draft);
     if (!state) return;
 
     const width = Math.max(1, documentRef.documentElement.clientWidth);
@@ -359,6 +365,105 @@ export function createOverlayRenderer(documentRef: Document = document): {
 
   return { root: () => overlayRoot, render, renderLaser };
 }
+
+export type AnnotationHost = {
+  /** 是否处于圈选工具 */
+  isCircleTool(): boolean;
+  /** 是否处于激光笔工具 */
+  isLaserTool(): boolean;
+  /** 一个圆画完（归一化坐标） */
+  addCircle(circle: { x1: number; y1: number; x2: number; y2: number }): void;
+  /** 激光笔移动（观众镜像等需要转发的场景） */
+  moveLaser?(point: { x: number; y: number }): void;
+};
+
+/**
+ * 指针标注（激光笔 + 圈选）的共用实现，业务页注入脚本与内置演示页共用一份，
+ * 避免两处逻辑各自演化出不同的缺陷。
+ *
+ * 要点：
+ * - 草稿用 .showit-circle--draft 标记，覆盖层重绘时会被保留（拖拽途中随时会有广播）。
+ * - 同时监听 pointerup 与 pointercancel；若上一次拖拽没收到结束事件，下一次按下时
+ *   按“已有尺寸就提交”收尾，绝不静默丢弃演讲者画过的那一笔。
+ * - pointerdown 会阻止默认行为：拖过输入框时浏览器会误判成文本拖选并发 pointercancel，
+ *   那样这一笔就没了。
+ */
+export function attachAnnotationLayer(
+  host: AnnotationHost,
+  renderer: ReturnType<typeof createOverlayRenderer>,
+  documentRef: Document = document
+): { detach(): void; cancel(): void } {
+  let circleDraft: { startX: number; startY: number; element: HTMLDivElement } | null = null;
+
+  const finishDraft = (commit: boolean) => {
+    const draft = circleDraft;
+    if (!draft) return;
+    circleDraft = null;
+    const left = Number(draft.element.style.left.slice(0, -1)) / 100;
+    const top = Number(draft.element.style.top.slice(0, -1)) / 100;
+    const width = Number(draft.element.style.width.slice(0, -1)) / 100;
+    const height = Number(draft.element.style.height.slice(0, -1)) / 100;
+    draft.element.remove();
+    if (!commit || width < 0.01 || height < 0.01) return;
+    host.addCircle({ x1: left, y1: top, x2: left + width, y2: top + height });
+  };
+
+  const onPointerMove = (event: PointerEvent) => {
+    if (host.isLaserTool() && event.pointerType === "mouse") {
+      const point = normalizedPoint(event);
+      renderer.renderLaser(point);
+      host.moveLaser?.(point);
+    }
+    if (!circleDraft) return;
+    const point = normalizedPoint(event);
+    circleDraft.element.style.left = `${Math.min(circleDraft.startX, point.x) * 100}%`;
+    circleDraft.element.style.top = `${Math.min(circleDraft.startY, point.y) * 100}%`;
+    circleDraft.element.style.width = `${Math.abs(point.x - circleDraft.startX) * 100}%`;
+    circleDraft.element.style.height = `${Math.abs(point.y - circleDraft.startY) * 100}%`;
+  };
+
+  const onPointerDown = (event: PointerEvent) => {
+    // 上一次拖拽若没收到 pointerup（DOM 变动、事件丢失都可能发生），这里按“已有尺寸
+    // 就提交”收尾：宁可多留一个演讲者确实画过的圈，也不要把这 quietly 丢掉。
+    finishDraft(true);
+    if (!host.isCircleTool() || event.button !== 0) return;
+    if (event.target instanceof HTMLElement && event.target.closest("[data-showit-overlay]")) return;
+    const overlayRoot = renderer.root();
+    if (!overlayRoot) return;
+    // 拖过输入框或可选中内容时，Chrome 会把这一笔判成文本拖选并发 pointercancel，
+    // 结果这一笔被无声丢弃。圈选模式下阻止默认行为即可保持 pointer 序列完整。
+    event.preventDefault();
+    const point = normalizedPoint(event);
+    const box = documentRef.createElement("div");
+    box.className = "showit-circle showit-circle--draft";
+    box.style.left = `${point.x * 100}%`;
+    box.style.top = `${point.y * 100}%`;
+    box.style.width = "0%";
+    box.style.height = "0%";
+    overlayRoot.append(box);
+    circleDraft = { startX: point.x, startY: point.y, element: box };
+  };
+
+  const onPointerUp = () => finishDraft(true);
+  const onPointerCancel = () => finishDraft(false);
+
+  window.addEventListener("pointermove", onPointerMove, true);
+  window.addEventListener("pointerdown", onPointerDown, true);
+  window.addEventListener("pointerup", onPointerUp, true);
+  window.addEventListener("pointercancel", onPointerCancel, true);
+  return {
+    detach() {
+      window.removeEventListener("pointermove", onPointerMove, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("pointerup", onPointerUp, true);
+      window.removeEventListener("pointercancel", onPointerCancel, true);
+    },
+    /** 工具被切走时调用：丢弃尚未完成的草稿 */
+    cancel() {
+      finishDraft(false);
+    }
+  };
+};
 
 export function normalizedPoint(event: { clientX: number; clientY: number }): { x: number; y: number } {
   const width = Math.max(1, document.documentElement.clientWidth);
