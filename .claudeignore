@@ -1,0 +1,39 @@
+# 让 Claude Code 不要把这些读进上下文——它们体积大且是自动生成的，
+# 每读一次都要按 token 计费，是触发网关 TPM（每分钟 token）限额的主要来源。
+# 说明：这些规则只影响 agent 的上下文，不影响构建与运行。
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+coverage/
+apps/extension/.output/
+apps/extension/.wxt/
+apps/extension/release/
+apps/extension/dev/
+apps/relay/public/demo/
+
+# 测试与运行产物
+test-results/
+playwright-report/
+*.log
+
+# 锁文件（约 200 KiB，读一次约 5 万 token）
+package-lock.json
+
+# 二进制与图片资产（对模型来说不可读，纯烧 token）
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.ico
+*.zip
+*.pdf
+*.woff
+*.woff2
+
+# 环境变量
+.env
+.env.*
+!.env.example

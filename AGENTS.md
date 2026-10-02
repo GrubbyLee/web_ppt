@@ -88,6 +88,19 @@ npm run release:extension        # 可复现 ZIP + SHA-256
 - `npm run dev` 之外改了入口/清单后，跑 `npm run typecheck` 会先执行 `wxt prepare` 重新生成 `.wxt/types`。
 - 旧版 LCAPIM 示例（指向 localhost:3001）在未被修改时会自动升级为内置示例，测试时不要假设它还在。
 
+## 上下文成本（给智能体的提醒）
+
+智能体每一轮都会把会话历史与读过的内容重发一遍，因此“读大文件”的代价会被反复计费，很容易触发网关的 TPM（每分钟 token）限额。这个项目里特别贵的东西：
+
+- `apps/extension/lib/dom-connector.ts`：内嵌了遮挡封面吉祥物的 base64（约 32 KB），**整篇读一次非常贵**。
+- `package-lock.json`（约 200 KB）、`node_modules/`、`apps/extension/.output/`、`test-results/`、`apps/relay/public/demo/`：已在 `.claudeignore` 中排除。
+
+建议做法：
+
+- 用 `rg -n` 定向搜索、用 `sed -n '起,止p'` 看片段，不要整文件读；
+- 长会话每完成一个阶段就压缩上下文，或开新会话处理下一个任务；
+- 不要把生成产物（截图、构建输出、锁文件）加进上下文。
+
 ## 参考文档
 
 - [用户手册](docs/用户手册.md) —— 行为与边界的权威描述

@@ -13,6 +13,7 @@
     video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
     .cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; text-align: center; padding: 24px; z-index: 5; }
     .cover--privacy { background: #172533; font-size: clamp(18px, 3vw, 30px); font-weight: 600; }
+    .cover--mask { background: linear-gradient(160deg,#12202b,#0d1015); font-size: clamp(18px, 2.6vw, 30px); font-weight: 600; }
     .cover--ended { background: #172533; }
     .cover--ended h1 { margin: 0; font-size: clamp(26px, 4vw, 48px); }
     .cover--ended p { margin: 0; color: #b9c4cf; }
@@ -34,6 +35,7 @@
       <p id="stateText">正在连接演示画面…</p>
     </div>
     <div class="cover cover--privacy hidden" id="privacyCover">画面已保护</div>
+    <div class="cover cover--mask hidden" id="maskCover"><span id="maskTitle">敏感信息遮挡，马上回来～</span></div>
     <div class="cover cover--ended hidden" id="endedCover">
       <h1 id="endTitle">演示结束</h1>
       <p id="endDescription">感谢观看</p>
@@ -76,6 +78,7 @@
       function showCover(which) {
         el("privacyCover").classList.toggle("hidden", which !== "privacy");
         el("endedCover").classList.toggle("hidden", which !== "ended");
+        el("maskCover").classList.toggle("hidden", which !== "mask");
       }
 
       function applySnapshot(next) {
@@ -84,12 +87,15 @@
         var brand = snapshot.brand || {};
         document.title = brand.audienceTitle || "Showit 观众屏";
         if (brand.privacyMessage) el("privacyCover").textContent = brand.privacyMessage;
+        if (brand.maskTitle) el("maskTitle").textContent = brand.maskTitle;
         if (brand.endTitle) el("endTitle").textContent = brand.endTitle;
         if (brand.endDescription) el("endDescription").textContent = brand.endDescription;
 
         var mode = snapshot.screenMode || "privacy";
         var offline = snapshot.offlineFallbackActive === true;
         if (mode === "ended") { showCover("ended"); clearState(); return; }
+        // 遮挡优先：观众不该在“被遮挡”时看到连接中或业务画面。
+        if (mode === "mask") { showCover("mask"); clearState(); return; }
         if (mode === "privacy" || offline) { showCover("privacy"); clearState(); return; }
         showCover(null);
 
