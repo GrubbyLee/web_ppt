@@ -132,6 +132,8 @@ export type OverlayState = {
   privacyMasks: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; mode: string }>;
   offlineActive: boolean;
   brand: { primaryColor: string; privacyMessage: string };
+  /** 遮挡封面：文案 + 可选自定义动图（screenMode = mask 时使用）。 */
+  mask: { title: string; imageDataUrl?: string | undefined } | null;
 };
 
 export type TabResponseMap = {

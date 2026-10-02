@@ -100,7 +100,8 @@ function DemoApp() {
           screenMode: machine.session.screenMode,
           privacyMessage: machine.project.brand.privacyMessage,
           privacyMasks: page?.privacyMasks ?? [],
-          circles: machine.session.circles
+          circles: machine.session.circles,
+          mask: { title: machine.project.brand.maskTitle, ...(machine.project.brand.maskImageDataUrl ? { imageDataUrl: machine.project.brand.maskImageDataUrl } : {}) }
         });
       }
     });

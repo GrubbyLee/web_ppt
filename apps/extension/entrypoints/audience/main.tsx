@@ -5,6 +5,7 @@ import { browser } from "wxt/browser";
 import type { BgMessage, BroadcastState, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 import { OfflineFallbackView } from "@/components/OfflineFallbackView";
+import { MASK_MASCOT_SVG, OVERLAY_STYLE } from "@/lib/dom-connector";
 import { DemoConsole } from "@/lib/demo/DemoConsole";
 import { demoViewFromUrl } from "@/lib/demo/views";
 import "@/components/ui.css";
@@ -112,6 +113,15 @@ function AudienceApp() {
     document.title = brand?.audienceTitle ?? "Showit 共享画面";
   }, [brand?.audienceTitle]);
 
+  // 遮挡封面与覆盖层共用一套样式（卡通人物动画），这里注入一次即可。
+  useEffect(() => {
+    if (document.head.querySelector("[data-showit-overlay-style]")) return;
+    const style = document.createElement("style");
+    style.setAttribute("data-showit-overlay-style", "1");
+    style.textContent = OVERLAY_STYLE;
+    document.head.append(style);
+  }, []);
+
   useEffect(() => {
     if (!needsVideo && videoLive) setVideoLive(false);
   }, [needsVideo, videoLive]);
@@ -179,6 +189,11 @@ function AudienceApp() {
             </>
           ) : screenMode === "privacy" ? (
             <span>{brand?.privacyMessage ?? "画面已保护"}</span>
+          ) : screenMode === "mask" ? (
+            <div className="showit-mask-page">
+              <div className="showit-mascot" dangerouslySetInnerHTML={{ __html: MASK_MASCOT_SVG }} />
+              <p className="showit-mask-title">{brand?.maskTitle ?? "敏感信息遮挡，马上回来～"}</p>
+            </div>
           ) : null}
         </div>
       ) : null}

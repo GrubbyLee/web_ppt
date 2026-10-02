@@ -58,7 +58,8 @@ export default defineUnlistedScript(() => {
       screenMode: overlay.screenMode,
       privacyMessage: overlay.brand.privacyMessage,
       privacyMasks: overlay.privacyMasks,
-      circles: overlay.circles
+      circles: overlay.circles,
+      mask: overlay.mask
     });
   }
 

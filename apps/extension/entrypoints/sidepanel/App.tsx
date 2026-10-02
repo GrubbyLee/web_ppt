@@ -253,7 +253,7 @@ export function App() {
           act({ type: "set-screen-mode", screenMode: session.screenMode === "frozen" ? "normal" : "frozen" });
           return;
         case "p":
-          act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" });
+          act({ type: "set-screen-mode", screenMode: session.screenMode === "mask" ? "normal" : "mask" });
           return;
         case "a":
           act({ type: "set-auto-advance", enabled: !project?.autoAdvanceEnabled });
@@ -385,11 +385,14 @@ export function App() {
             disabled={!session.circles.length}
             onClick={() => act({ type: "undo-annotation" })}
           />
-          <ToolbarButton icon={<Eraser size={16} />} label="遮罩" title="框选隐私遮罩元素：点击后在画面上点要遮挡的元素（Esc 取消）" onClick={() => send({ type: "pick-mask" })} />
-          {/* 遮罩会随退出演示写回项目，所以必须能在演示中删掉误框的那些。 */}
-          {page.privacyMasks.length > 0 ? (
-            <ToolbarButton icon={<ShieldOff size={16} />} label="清除遮罩" title={`清除本页 ${page.privacyMasks.length} 个隐私遮罩`} onClick={() => act({ type: "clear-privacy-masks" })} />
-          ) : null}
+          {/* 遮罩 = 遮挡封面：与圈选标注、撤销完全无关，就是一个整屏开关。 */}
+          <ToolbarButton
+            icon={<Eraser size={16} />}
+            label="遮罩"
+            title={session.screenMode === "mask" ? "恢复画面（观众重新看到业务系统）" : "遮挡画面：观众看到遮挡页，看不到任何业务内容"}
+            active={session.screenMode === "mask"}
+            onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "mask" ? "normal" : "mask" })}
+          />
           <ToolbarButton icon={<TriangleAlert size={16} />} label={offlineActive ? "返回业务" : "离线备用"} title={offlineActive ? "返回业务页面" : "切换离线备用"} active={offlineActive} disabled={!page.offline && !offlineActive} onClick={() => act({ type: "set-offline-fallback-active", active: !offlineActive })} />
         </div>
       </section>
@@ -507,7 +510,6 @@ export function App() {
         <section className="panel-group panel-group--deliver">
           <span className="panel-group__title">画面与投送</span>
           <div className="panel-group__actions">
-            <ToolbarButton icon={<TriangleAlert size={16} />} label="隐私遮挡" title="隐私遮挡（P）" active={session.screenMode === "privacy"} onClick={() => act({ type: "set-screen-mode", screenMode: session.screenMode === "privacy" ? "normal" : "privacy" })} />
             <ToolbarButton icon={<MonitorPlay size={16} />} label="共享画面" title="视频会议共享源：打开只读画面窗口，会议里只共享这个窗口（不含控制台）；观众也可改用远程链接在自己浏览器观看" onClick={() => send({ type: "open-audience" })} />
             <ToolbarButton icon={moreOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />} label={moreOpen ? "收起" : "更多"} title="更多画面控制与投送方式" active={moreOpen} onClick={() => setMoreOpen(!moreOpen)} />
           </div>
@@ -534,6 +536,10 @@ export function App() {
                 }}
               />
               {meta.viewerCount >= 0 && machine.localAudience && !meta.captureActive ? <ToolbarButton icon={<MonitorPlay size={16} />} label="授权捕获" title="捕获需要页面手势授权（右键菜单或 Ctrl+Shift+9）；此按钮在授权后重试" onClick={() => send({ type: "authorize-capture" })} /> : null}
+            <ToolbarButton icon={<Eraser size={16} />} label="框选区域" title="点选页面元素长期遮挡该区域（会写入项目，与「遮罩」整屏开关无关）" onClick={() => send({ type: "pick-mask" })} />
+            {page.privacyMasks.length > 0 ? (
+              <ToolbarButton icon={<ShieldOff size={16} />} label="清除区域" title={`清除本页 ${page.privacyMasks.length} 个长期遮挡区域`} onClick={() => act({ type: "clear-privacy-masks" })} />
+            ) : null}
               <ToolbarButton icon="⛶" label="全屏控制台" title="在标签页中打开控制台，占满整个屏幕" onClick={() => send({ type: "open-console-tab" })} />
             </div>
           ) : null}
@@ -887,7 +893,7 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
         <li><kbd>↑</kbd>/<kbd>↓</kbd> 上一步骤 / 下一步骤</li>
         <li><kbd>空格</kbd> 开始 / 暂停计时</li>
         <li><kbd>L</kbd> 激光笔 · <kbd>C</kbd> 圈选标注</li>
-        <li><kbd>B</kbd> 黑屏 · <kbd>W</kbd> 白屏 · <kbd>F</kbd> 冻结 · <kbd>P</kbd> 隐私遮挡</li>
+        <li><kbd>B</kbd> 黑屏 · <kbd>W</kbd> 白屏 · <kbd>F</kbd> 冻结 · <kbd>P</kbd> 遮挡画面</li>
         <li><kbd>A</kbd> 自动翻页开关 · <kbd>R</kbd> 排练</li>
         <li><kbd>Esc</kbd> 逐级退出（对话框 → 编辑 → 标注 → 屏幕模式）</li>
       </ul>

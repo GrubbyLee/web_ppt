@@ -25,7 +25,8 @@ function readState(): CompositorState {
   return {
     screenMode: latest.screenMode,
     offlineFallbackActive: latest.offlineFallbackActive || latest.captureUnsafe,
-    privacyMasks: latest.privacyMasks
+    privacyMasks: latest.privacyMasks,
+    maskTitle: latest.maskTitle
   };
 }
 
@@ -195,6 +196,7 @@ function connectPort(): void {
         screenMode: machine.session.screenMode,
         offlineFallbackActive: machine.session.offlineFallbackPageId !== null && machine.session.offlineFallbackPageId === page?.id,
         privacyMasks: sanitizeAudienceMasks(page?.privacyMasks ?? []),
+        maskTitle: machine.project.brand.maskTitle,
         // Blocked = sensitive inputs (password/MFA/file) or origin mismatch —
         // the audience must never watch credentials being entered.
         captureUnsafe: message.state.meta.tabUnsafeOrigin === true || message.state.meta.connectorState?.state === "blocked"

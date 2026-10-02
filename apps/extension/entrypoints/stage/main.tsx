@@ -23,7 +23,20 @@ function renderStageOverlay(state: BroadcastState): void {
   const machine = state.machine;
   const page = machine.project.pages[machine.session.currentPageIndex] ?? null;
   const offline = Boolean(page && machine.session.offlineFallbackPageId === page.id);
-  if (machine.session.screenMode !== "normal" || offline) {
+  const screenMode = machine.session.screenMode;
+  // 整屏遮罩（mask）由覆盖层渲染：它是全屏封面，会盖住下面的幻灯片。
+  if (screenMode === "mask") {
+    overlayRenderer.render({
+      screenMode: "mask",
+      privacyMessage: machine.project.brand.privacyMessage,
+      privacyMasks: [],
+      circles: [],
+      mask: { title: machine.project.brand.maskTitle, ...(machine.project.brand.maskImageDataUrl ? { imageDataUrl: machine.project.brand.maskImageDataUrl } : {}) }
+    });
+    return;
+  }
+  // 黑屏 / 白屏 / 隐私 / 结束由 React 渲染（结束页要显示品牌 Logo），这里交回覆盖层会重影。
+  if (screenMode !== "normal" || offline) {
     overlayRenderer.render(null);
     return;
   }
@@ -31,7 +44,8 @@ function renderStageOverlay(state: BroadcastState): void {
     screenMode: "normal",
     privacyMessage: machine.project.brand.privacyMessage,
     privacyMasks: (page?.privacyMasks ?? []).map((mask) => ({ id: mask.id, x1: mask.x1, y1: mask.y1, x2: mask.x2, y2: mask.y2, mode: mask.mode })),
-    circles: machine.session.circles
+    circles: machine.session.circles,
+    mask: { title: machine.project.brand.maskTitle, ...(machine.project.brand.maskImageDataUrl ? { imageDataUrl: machine.project.brand.maskImageDataUrl } : {}) }
   });
 }
 

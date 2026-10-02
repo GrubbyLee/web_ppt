@@ -275,6 +275,7 @@ function relaySnapshot(): Record<string, unknown> {
     brand: {
       audienceTitle: machine.project.brand.audienceTitle,
       privacyMessage: machine.project.brand.privacyMessage,
+      maskTitle: machine.project.brand.maskTitle,
       endTitle: machine.project.brand.endTitle,
       endDescription: machine.project.brand.endDescription
     }
@@ -541,7 +542,11 @@ function overlayStateFor(page: PresentationPage): OverlayState {
     circles: machine!.session.circles,
     privacyMasks: page.privacyMasks.map((mask) => ({ id: mask.id, x1: mask.x1, y1: mask.y1, x2: mask.x2, y2: mask.y2, mode: mask.mode })),
     offlineActive: offlineActive(),
-    brand: { primaryColor: project.brand.primaryColor, privacyMessage: project.brand.privacyMessage }
+    brand: { primaryColor: project.brand.primaryColor, privacyMessage: project.brand.privacyMessage },
+    mask: {
+      title: project.brand.maskTitle,
+      ...(project.brand.maskImageDataUrl ? { imageDataUrl: project.brand.maskImageDataUrl } : {})
+    }
   };
 }
 
