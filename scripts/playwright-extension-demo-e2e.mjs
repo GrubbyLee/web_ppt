@@ -285,8 +285,11 @@ try {
   await sidepanel.waitForTimeout(900);
   const maskTitle = await demoPage.locator(".showit-mask-title").textContent().catch(() => null);
   assert((maskTitle ?? "").includes("敏感信息遮挡"), `演示页显示默认遮挡页（${maskTitle}）`);
-  assert(await demoPage.locator(".showit-mascot-svg").count() === 1, "遮挡页带卡通人物");
-  const mascotAnimation = await demoPage.locator(".showit-mascot-body").evaluate((node) => getComputedStyle(node).animationName).catch(() => "");
+  const mascot = demoPage.locator(".showit-mascot .showit-mask-image");
+  assert(await mascot.count() === 1, "遮挡页带吉祥物");
+  assert((await mascot.getAttribute("src").catch(() => "") ?? "").startsWith("data:image/webp"), "吉祥物是内置的离线图片");
+  assert(await mascot.evaluate((node) => node.complete && node.naturalWidth > 0), "吉祥物图片已成功解码");
+  const mascotAnimation = await demoPage.locator(".showit-mascot").evaluate((node) => getComputedStyle(node).animationName).catch(() => "");
   assert(mascotAnimation === "showit-mascot-float", `卡通人物在动（animation=${mascotAnimation}）`);
   assert(await audiencePage.locator(".showit-mask-page").count() === 1, "观众页同步显示遮挡页");
   await maskButton.click();
