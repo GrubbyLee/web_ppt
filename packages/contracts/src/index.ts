@@ -140,7 +140,9 @@ export const ConnectorSecurityModeSchema = z.enum(["interactive", "request-prote
 export const StepKindSchema = z.enum(["say", "act", "expect", "transition"]);
 export const StepExecutionSchema = z.enum(["hint", "highlight", "assist", "auto"]);
 export const PageTypeSchema = z.enum(["fixed", "business", "external", "end"]);
-export const ScreenModeSchema = z.enum(["normal", "black", "white", "frozen", "privacy", "ended"]);
+/** mask = 演示者主动开启的「遮挡封面」：整屏挡住画面，观众看不到任何业务内容。
+ *  与圈选标注无关，也不进撤销栈。 */
+export const ScreenModeSchema = z.enum(["normal", "black", "white", "frozen", "privacy", "mask", "ended"]);
 export const TimerStatusSchema = z.enum(["idle", "running", "paused"]);
 export const AudienceStatusSchema = z.enum(["disconnected", "connecting", "synced"]);
 export const AudienceJoinModeSchema = z.enum(["direct", "approval"]);
@@ -324,6 +326,14 @@ const brandColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "品牌颜色必须使�
 export const ProjectBrandSchema = z.object({
   primaryColor: brandColor.default("#37d0ba"),
   statusBackgroundColor: brandColor.default("#172533"),
+  /** 遮挡封面的主文案，演示准备期间可在项目里改。 */
+  maskTitle: z.string().min(1).max(120).default("敏感信息遮挡，马上回来～"),
+  /** 自定义遮挡动图（GIF / PNG / JPEG / WebP），留空则用内置的卡通人物动画。 */
+  maskImageDataUrl: z
+    .string()
+    .max(1_500_000)
+    .regex(/^data:image\/(?:png|jpeg|webp|gif);base64,/, "遮挡动图必须是 PNG、JPEG、WebP 或 GIF 图片。")
+    .optional(),
   privacyMessage: z.string().min(1).max(120).default("演示准备中"),
   loadingMessage: z.string().min(1).max(120).default("正在准备业务画面"),
   offlineLabel: z.string().min(1).max(40).default("离线备用"),
@@ -350,6 +360,7 @@ export const ProjectSchema = z.object({
   brand: ProjectBrandSchema.default({
     primaryColor: "#37d0ba",
     statusBackgroundColor: "#172533",
+    maskTitle: "敏感信息遮挡，马上回来～",
     privacyMessage: "演示准备中",
     loadingMessage: "正在准备业务画面",
     offlineLabel: "离线备用",

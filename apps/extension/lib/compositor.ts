@@ -1,4 +1,4 @@
-const screenModes = new Set(["normal", "black", "white", "frozen", "privacy", "ended"]);
+const screenModes = new Set(["normal", "black", "white", "frozen", "privacy", "mask", "ended"]);
 
 export type AudienceMaskLike = {
   x1?: unknown;
@@ -12,6 +12,8 @@ export type CompositorState = {
   screenMode?: string | undefined;
   offlineFallbackActive?: boolean;
   privacyMasks?: unknown;
+  /** 遮挡封面文案：远程观众看到的是合成后的视频，所以文案要在画面里画出来。 */
+  maskTitle?: string | undefined;
 };
 
 function clamp(value: number): number {
@@ -35,9 +37,64 @@ export function sanitizeAudienceMasks(value: unknown): Array<{ x1: number; y1: n
   });
 }
 
-export function resolveAudienceFrameMode(state: CompositorState | null | undefined): "normal" | "black" | "white" | "frozen" | "privacy" | "ended" {
+export function resolveAudienceFrameMode(state: CompositorState | null | undefined): "normal" | "black" | "white" | "frozen" | "privacy" | "mask" | "ended" {
   if (state?.offlineFallbackActive) return "privacy";
-  return screenModes.has(state?.screenMode ?? "") ? state?.screenMode as CompositorState["screenMode"] as "normal" | "black" | "white" | "frozen" | "privacy" | "ended" : "privacy";
+  return screenModes.has(state?.screenMode ?? "") ? state?.screenMode as CompositorState["screenMode"] as "normal" | "black" | "white" | "frozen" | "privacy" | "mask" | "ended" : "privacy";
+}
+
+/** 在合成画面里画遮挡页：会动的小人 + 文案，避免观众盯着一块死板的色块。 */
+function paintMaskScene(context: CanvasRenderingContext2D, title: string, width: number, height: number): void {
+  context.filter = "none";
+  const gradient = context.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "#12202b");
+  gradient.addColorStop(1, "#0d1015");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+
+  const unit = Math.min(width, height);
+  // 用时间驱动上下浮动：合成器以 30fps 连续重绘，所以这就是动画。
+  const bob = Math.sin(Date.now() / 320) * (unit * 0.02);
+  const radius = unit * 0.11;
+  const centerX = width / 2;
+  const centerY = height / 2 - unit * 0.08 + bob;
+
+  context.fillStyle = "rgba(143,160,178,.16)";
+  context.beginPath();
+  context.ellipse(centerX, centerY + radius * 1.72, radius * 0.92, radius * 0.18, 0, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = "#37d0ba";
+  context.beginPath();
+  context.roundRect(centerX - radius * 0.62, centerY + radius * 0.5, radius * 1.24, radius * 1.24, radius * 0.5);
+  context.fill();
+
+  context.fillStyle = "#4ce4cc";
+  context.beginPath();
+  context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  context.fill();
+
+  const blink = Math.sin(Date.now() / 900) > 0.94;
+  context.fillStyle = "#0d141b";
+  const eyeOffset = radius * 0.34;
+  const eyeRadius = radius * 0.13;
+  for (const sign of [-1, 1]) {
+    context.beginPath();
+    if (blink) context.ellipse(centerX + sign * eyeOffset, centerY - radius * 0.1, eyeRadius, eyeRadius * 0.2, 0, 0, Math.PI * 2);
+    else context.arc(centerX + sign * eyeOffset, centerY - radius * 0.1, eyeRadius, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.strokeStyle = "#0d141b";
+  context.lineWidth = Math.max(2, radius * 0.1);
+  context.lineCap = "round";
+  context.beginPath();
+  context.arc(centerX, centerY + radius * 0.12, radius * 0.38, 0.25 * Math.PI, 0.75 * Math.PI);
+  context.stroke();
+
+  context.fillStyle = "#e9eff4";
+  context.font = `600 ${Math.round(unit * 0.045)}px system-ui, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(title || "敏感信息遮挡，马上回来～", centerX, centerY + radius * 1.72 + unit * 0.07, width * 0.86);
 }
 
 function paintCover(context: CanvasRenderingContext2D, mode: string, width: number, height: number): void {
@@ -112,6 +169,8 @@ export function createAudienceCompositor(
     if (mode === "frozen") {
       if (previousMode !== "frozen") frozenContext.drawImage(canvas, 0, 0, width, height);
       context.drawImage(frozen, 0, 0, width, height);
+    } else if (mode === "mask") {
+      paintMaskScene(context, state?.maskTitle ?? "", width, height);
     } else if (mode === "normal" && video.readyState >= 2) {
       context.filter = "none";
       context.drawImage(video, 0, 0, width, height);

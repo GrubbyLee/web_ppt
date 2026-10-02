@@ -38,6 +38,7 @@ export function screenModeLabel(mode: PresentationSession["screenMode"]): string
     white: "白屏",
     frozen: "冻结",
     privacy: "隐私遮挡",
+    mask: "遮挡中",
     ended: "结束"
   };
   return labels[mode] ?? mode;

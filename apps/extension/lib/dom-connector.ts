@@ -248,12 +248,71 @@ export function resolvePrivacyMasks(items: Array<{ id: string; locator: Locator 
 
 // ---- overlay (covers, masks, circles, laser) ---------------------------------------------
 
+/**
+ * 内置遮挡页的卡通人物：纯 SVG + CSS 动画，不发请求、不依赖外部资源，
+ * 所以离线也能动。人物会浮动、眨眼、挥手，避免遮挡页过于死板。
+ */
+export const MASK_MASCOT_SVG = `<svg class="showit-mascot-svg" viewBox="0 0 120 120" aria-hidden="true">
+  <ellipse class="showit-mascot-shadow" cx="60" cy="108" rx="30" ry="5"/>
+  <g class="showit-mascot-body">
+    <rect x="34" y="60" width="52" height="38" rx="18" fill="#37d0ba"/>
+    <g class="showit-mascot-arm">
+      <rect x="86" y="62" width="10" height="24" rx="5" fill="#2bbfa6"/>
+    </g>
+    <circle cx="60" cy="46" r="26" fill="#4ce4cc"/>
+    <g class="showit-mascot-eyes">
+      <circle cx="51" cy="44" r="4.6" fill="#0d141b"/>
+      <circle cx="69" cy="44" r="4.6" fill="#0d141b"/>
+    </g>
+    <path d="M51 54q9 8 18 0" fill="none" stroke="#0d141b" stroke-width="3" stroke-linecap="round"/>
+    <rect x="30" y="70" width="9" height="20" rx="4.5" fill="#2bbfa6"/>
+  </g>
+</svg>`;
+
+/** 构建遮挡封面内容：优先用项目配置的动图，否则用内置卡通人物。 */
+function createMaskPage(mask: OverlayShape["mask"], documentRef: Document, fallbackTitle: string): HTMLElement {
+  const page = documentRef.createElement("div");
+  page.className = "showit-mask-page";
+  const art = documentRef.createElement("div");
+  art.className = "showit-mascot";
+  if (mask?.imageDataUrl) {
+    const image = documentRef.createElement("img");
+    image.className = "showit-mask-image";
+    image.alt = "";
+    image.src = mask.imageDataUrl;
+    art.append(image);
+  } else {
+    // 静态常量，不含任何项目数据。
+    art.innerHTML = MASK_MASCOT_SVG;
+  }
+  const title = documentRef.createElement("p");
+  title.className = "showit-mask-title";
+  title.textContent = mask?.title || fallbackTitle;
+  page.append(art, title);
+  return page;
+}
+
 export const OVERLAY_STYLE = [
   ".showit-layer{position:absolute;inset:0;}",
   ".showit-cover{display:flex;align-items:center;justify-content:center;color:#fff;font:600 clamp(18px,3vw,30px)/1.4 system-ui,sans-serif;background:#172533;}",
   ".showit-cover.is-black{background:#050607;}",
   ".showit-cover.is-white{background:#fff;color:#0d1015;}",
   ".showit-cover.is-ended{background:#172533;}",
+  ".showit-cover.is-mask{background:linear-gradient(160deg,#12202b,#0d1015);}",
+  ".showit-mask-page{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:24px;text-align:center;}",
+  ".showit-mascot{width:clamp(96px,12vw,140px);height:clamp(96px,12vw,140px);}",
+  ".showit-mascot-svg{width:100%;height:100%;overflow:visible;}",
+  ".showit-mask-image{max-width:220px;max-height:220px;object-fit:contain;}",
+  ".showit-mask-title{margin:0;font-weight:600;font-size:clamp(18px,2.6vw,30px);line-height:1.5;}",
+  ".showit-mascot-body{transform-origin:60px 104px;animation:showit-mascot-float 1.9s ease-in-out infinite;}",
+  ".showit-mascot-arm{transform-origin:86px 64px;animation:showit-mascot-wave 1.15s ease-in-out infinite;}",
+  ".showit-mascot-eyes{transform-origin:60px 44px;animation:showit-mascot-blink 3.6s ease-in-out infinite;}",
+  ".showit-mascot-shadow{fill:#8fa0b2;opacity:.16;transform-origin:60px 108px;animation:showit-mascot-shadow 1.9s ease-in-out infinite;}",
+  "@keyframes showit-mascot-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}",
+  "@keyframes showit-mascot-wave{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(30deg)}}",
+  "@keyframes showit-mascot-blink{0%,90%,100%{transform:scaleY(1)}95%{transform:scaleY(.12)}}",
+  "@keyframes showit-mascot-shadow{0%,100%{transform:scaleX(1);opacity:.16}50%{transform:scaleX(.8);opacity:.1}}",
+  "@media (prefers-reduced-motion: reduce){.showit-mascot-body,.showit-mascot-arm,.showit-mascot-eyes,.showit-mascot-shadow{animation:none}}",
   ".showit-mask{position:absolute;background:#111820;}",
   ".showit-mask.is-blur{backdrop-filter:blur(18px);background:rgb(10 15 20 / 45%);}",
   ".showit-circle{position:absolute;border:3px solid #f4b44d;border-radius:50%;box-shadow:0 0 0 2px rgb(5 6 7 / 60%);}",
@@ -263,6 +322,8 @@ export const OVERLAY_STYLE = [
 export type OverlayShape = {
   screenMode: string;
   privacyMessage: string;
+  /** 遮挡封面（screenMode=mask）：文案 + 可选自定义动图。 */
+  mask: { title: string; imageDataUrl?: string | undefined } | null;
   privacyMasks: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; mode: string }>;
   circles: Array<{ id: string; x1: number; y1: number; x2: number; y2: number }>;
 };
@@ -313,8 +374,12 @@ export function createOverlayRenderer(documentRef: Document = document): {
 
     if (state.screenMode !== "normal") {
       const cover = documentRef.createElement("div");
-      cover.className = `showit-layer showit-cover${state.screenMode === "black" ? " is-black" : state.screenMode === "white" ? " is-white" : state.screenMode === "ended" ? " is-ended" : ""}`;
-      cover.textContent = state.screenMode === "ended" ? "演示已结束" : state.screenMode === "black" ? "" : state.screenMode === "white" ? "" : state.privacyMessage || "画面已保护";
+      cover.className = `showit-layer showit-cover${state.screenMode === "black" ? " is-black" : state.screenMode === "white" ? " is-white" : state.screenMode === "ended" ? " is-ended" : state.screenMode === "mask" ? " is-mask" : ""}`;
+      if (state.screenMode === "mask") {
+        cover.append(createMaskPage(state.mask, documentRef, "敏感信息遮挡，马上回来～"));
+      } else {
+        cover.textContent = state.screenMode === "ended" ? "演示已结束" : state.screenMode === "black" ? "" : state.screenMode === "white" ? "" : state.privacyMessage || "画面已保护";
+      }
       host.append(cover);
       return;
     }
