@@ -145,7 +145,7 @@ export function App() {
     const timer = setInterval(() => {
       setNow(Date.now());
       send({ type: "tick", uiBlocked: notesEditingRef.current });
-    }, 500);
+    }, 1000);
     return () => clearInterval(timer);
   }, [send]);
 
@@ -349,6 +349,16 @@ export function App() {
   const thresholdSeconds = page.autoAdvanceSeconds ?? project.autoAdvanceSeconds;
   const autoAdvanceRatio = project.autoAdvanceEnabled ? Math.min(1, autoAdvanceMs / (thresholdSeconds * 1000)) : 0;
   const stepExecution = meta.stepExecution;
+  const operatorState = !meta.live
+    ? { tone: "bad" as const, title: "演示画面未连接", detail: "业务标签可能已关闭或浏览器刚刚恢复，请点击“恢复画面标签”。" }
+    : meta.connectorState?.state === "blocked" || meta.connectorState?.state === "error"
+      ? { tone: "bad" as const, title: "业务页受阻", detail: meta.connectorState.reason ?? "请检查业务页和站点权限。" }
+      : meta.connectorState?.state === "anonymous" || meta.connectorState?.state === "role-mismatch"
+        ? { tone: "warn" as const, title: meta.connectorState.state === "anonymous" ? "业务页未登录" : "业务角色不符", detail: meta.connectorState.reason ?? "请先完成当前页面要求的业务状态。" }
+        : machine.localAudience && !meta.captureActive && !offlineActive && session.screenMode === "normal"
+          ? { tone: "warn" as const, title: "观众画面待授权", detail: "在业务标签页右键授权，或按 Ctrl+Shift+9。" }
+          : { tone: "ok" as const, title: "演示运行正常", detail: meta.remote ? `远程观众 ${meta.remote.viewerCount} 人` : meta.viewerCount > 0 ? `本机观众 ${meta.viewerCount} 人` : "当前没有观众连接。" };
+  const safeModeActive = session.screenMode !== "normal";
 
   return (
     <main className="panel">
@@ -360,6 +370,28 @@ export function App() {
         <span className="chip chip--muted">{meta.viewerCount > 0 || machine.localAudience ? `观众 ${meta.viewerCount}` : "无观众"}</span>
         <ToolbarButton icon={<FolderTree size={16} />} label="项目库" title="项目库：查看项目数量、切换要演示的项目（演示开始前使用）" onClick={() => setLibraryOpen(true)} />
       </header>
+
+      <section className={`operator-status operator-status--${operatorState.tone}`} aria-live="polite">
+        <div className="operator-status__main">
+          <span className="operator-status__dot" aria-hidden="true" />
+          <div>
+            <strong>{operatorState.title}</strong>
+            <span>{operatorState.detail}</span>
+          </div>
+        </div>
+        <div className="operator-status__actions">
+          {!meta.live ? <ToolbarButton icon={<RotateCcw size={15} />} label="恢复画面标签" variant="primary" onClick={() => send({ type: "resume" })} /> : null}
+          {machine.localAudience && !meta.captureActive && !offlineActive && session.screenMode === "normal" ? <ToolbarButton icon={<MonitorPlay size={15} />} label="授权捕获" onClick={() => send({ type: "authorize-capture" })} /> : null}
+        </div>
+      </section>
+
+      {safeModeActive ? (
+        <section className="operator-safety" aria-label="观众安全控制">
+          <strong>{screenModeLabel(session.screenMode)}</strong>
+          <span>观众当前不会看到业务画面</span>
+          <ToolbarButton icon={<RotateCcw size={15} />} label="恢复业务画面" onClick={() => act({ type: "set-screen-mode", screenMode: "normal" })} />
+        </section>
+      ) : null}
 
       <section className="panel-page" aria-label="当前页面">
         <div className="panel-page__head">
@@ -462,7 +494,7 @@ export function App() {
         </div>
       </section>
 
-      {meta.message ?? notice ? <output className="panel-message">{meta.message ?? notice}</output> : null}
+      {notice ?? meta.message ? <output className="panel-message" aria-live="polite">{notice ?? meta.message}</output> : null}
 
       <footer className="panel-footer">
         <div className="panel-timers">
@@ -475,7 +507,7 @@ export function App() {
         <section className="panel-group panel-group--pages">
           <span className="panel-group__title">页面</span>
           <div className="panel-group__actions panel-page-nav">
-            <ToolbarButton icon={<ChevronLeft size={16} />} label="上一页" title="上一页（←）" onClick={() => act({ type: "set-active-page", index: session.currentPageIndex - 1 })} />
+            <ToolbarButton icon={<ChevronLeft size={16} />} label="上一页" title="上一页（←）" disabled={session.currentPageIndex <= 0} onClick={() => act({ type: "set-active-page", index: session.currentPageIndex - 1 })} />
             <select
               className="panel-page-jump"
               aria-label="跳转到页面"
@@ -486,7 +518,7 @@ export function App() {
                 <option key={item.id} value={index}>{`${index + 1}/${project.pages.length} ${item.title}`}</option>
               ))}
             </select>
-            <ToolbarButton icon={<ChevronRight size={16} />} label="下一页" title="下一页（→）" variant="primary" onClick={() => act({ type: "set-active-page", index: session.currentPageIndex + 1 })} />
+            <ToolbarButton icon={<ChevronRight size={16} />} label="下一页" title="下一页（→）" variant="primary" disabled={session.currentPageIndex >= project.pages.length - 1} onClick={() => act({ type: "set-active-page", index: session.currentPageIndex + 1 })} />
           </div>
         </section>
 
@@ -547,7 +579,7 @@ export function App() {
 
         <section className="panel-group panel-group--end">
           <div className="panel-group__actions">
-            <ToolbarButton icon={<Settings size={16} />} label="设置" title="项目设置、逐页健康检查与诊断" onClick={() => setDialog("settings")} />
+            <ToolbarButton icon={<Settings size={16} />} label="演前检查" title="演示前检查项目配置、业务页、离线备用和诊断" onClick={() => setDialog("settings")} />
             <ToolbarButton icon={<Power size={16} />} label="结束演示" variant="danger" onClick={() => send({ type: "end-session" })} />
           </div>
         </section>
