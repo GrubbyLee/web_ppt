@@ -1,6 +1,6 @@
 {
   "name": "showit",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": true,
   "description": "Showit local presentation workspace (Chrome extension, WXT)",
   "type": "module",
