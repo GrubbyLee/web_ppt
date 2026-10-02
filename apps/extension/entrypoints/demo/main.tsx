@@ -7,6 +7,7 @@ import { appliedMutations, applyDemoMutation, readDemoSession, writeDemoSession,
 import {
   attachAnnotationLayer,
   checkCondition,
+  lockPageSelection,
   createOverlayRenderer,
   createRecorder,
   executeAction,
@@ -88,6 +89,8 @@ function DemoApp() {
         // 工具被切走时丢弃拖拽中的草稿。
         if (annotationTool !== machine.session.annotationTool) annotationLayer?.cancel();
         annotationTool = machine.session.annotationTool;
+        // 标注期间禁止选中页面元素：划动会被浏览器当成拖选文本。
+        lockPageSelection(annotationTool !== "none");
         // Same reasoning as the audience mirror: the mutations live in module
         // state, so nudge a render after replaying them.
         for (const mutation of message.state.meta.demoMutations) applyDemoMutation(mutation as DemoMutation);

@@ -366,6 +366,28 @@ export function createOverlayRenderer(documentRef: Document = document): {
   return { root: () => overlayRoot, render, renderLaser };
 }
 
+let selectionLockStyle: HTMLStyleElement | null = null;
+
+/**
+ * 标注工具激活期间禁止页面元素被选中。
+ *
+ * 激光笔与圈选都要在业务页面上按住鼠标划动，浏览器默认会把它当成“拖选文本”，于是
+ * 业务页面的文字被高亮选中——演示画面上出现一片蓝色选区，非常难看。按下时
+ * preventDefault 只能挡住起点，双击、拖出元素继续移动等情况仍然会选中，所以这里在
+ * 工具激活期间直接给文档加类，整体禁用 user-select；工具回到“无”时立即解除。
+ */
+export function lockPageSelection(locked: boolean, documentRef: Document = document): void {
+  if (locked && !selectionLockStyle) {
+    const style = documentRef.createElement("style");
+    style.setAttribute("data-showit-selection-lock", "1");
+    // 只影响标注期间：工具类加上才生效，移除类即恢复原有行为（不改动业务页样式）。
+    style.textContent = ".showit-annotation, .showit-annotation * { user-select: none !important; -webkit-user-select: none !important; }";
+    documentRef.head.append(style);
+    selectionLockStyle = style;
+  }
+  documentRef.documentElement.classList.toggle("showit-annotation", locked);
+}
+
 export type AnnotationHost = {
   /** 是否处于圈选工具 */
   isCircleTool(): boolean;

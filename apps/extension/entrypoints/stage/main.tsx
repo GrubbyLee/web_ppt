@@ -5,7 +5,7 @@ import type { Browser } from "wxt/browser";
 import type { BgMessage, BroadcastState, UiMessage } from "@/messaging/protocol";
 import { PORT_PREFIX } from "@/messaging/protocol";
 import { OfflineFallbackView } from "@/components/OfflineFallbackView";
-import { attachAnnotationLayer, createOverlayRenderer, makeCircleId } from "@/lib/dom-connector";
+import { attachAnnotationLayer, createOverlayRenderer, lockPageSelection, makeCircleId } from "@/lib/dom-connector";
 import "@/components/ui.css";
 import "./stage.css";
 
@@ -50,6 +50,8 @@ function StageApp() {
         const nextTool = message.state.machine.session.annotationTool;
         if (toolRef.current !== nextTool) annotationLayer?.cancel();
         toolRef.current = nextTool;
+        // 标注期间禁止选中页面元素：划动会被浏览器当成拖选文本。
+        lockPageSelection(nextTool !== "none");
         setState(message.state);
         renderStageOverlay(message.state);
       }

@@ -4,6 +4,7 @@ import { probeConnectorSession } from "@/lib/connector-session";
 import {
   attachAnnotationLayer,
   checkCondition,
+  lockPageSelection,
   createOverlayRenderer,
   createRecorder,
   executeAction,
@@ -51,6 +52,8 @@ export default defineUnlistedScript(() => {
       overlayRenderer.renderLaser(null);
       annotations.cancel();
     }
+    // 标注期间禁止选中页面元素：划动会被浏览器当成拖选文本。
+    lockPageSelection(overlay.annotationTool !== "none");
     overlayRenderer.render({
       screenMode: overlay.screenMode,
       privacyMessage: overlay.brand.privacyMessage,
