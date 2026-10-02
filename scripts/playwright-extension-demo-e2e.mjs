@@ -78,6 +78,22 @@ try {
     assert((title ?? "").includes("云枢"), `封面标题：${title?.trim()}`);
   }
 
+  // 封面页走的是舞台页渲染：它曾有一份独立的圈选实现，这里守住“画得出、撤得掉”。
+  const coverPage = context.pages().find((page) => page.url().includes("/stage.html"));
+  if (coverPage) {
+    await sidepanel.locator(".panel-page__tools").getByTitle("圈选标注（C）").click();
+    await coverPage.mouse.move(400, 250);
+    await coverPage.mouse.down();
+    await coverPage.mouse.move(700, 520, { steps: 6 });
+    await coverPage.mouse.up();
+    await sidepanel.waitForTimeout(800);
+    const coverCircles = await coverPage.locator("[data-showit-overlay] .showit-circle").count();
+    assert(coverCircles === 1, `封面页（舞台页）可以圈选（实际 ${coverCircles}）`);
+    await sidepanel.locator(".panel-page__tools").getByTitle(/^撤销最后一个标注/).click();
+    await sidepanel.waitForTimeout(700);
+    assert(await coverPage.locator("[data-showit-overlay] .showit-circle").count() === 0, "舞台页标注可以撤销");
+  }
+
   console.log("2b) 演示中再次运行：项目库隐藏且不残留会话标签");
   await sidepanel.getByTitle(/^项目库/).click();
   await sidepanel.waitForSelector(".panel-library", { timeout: 5_000 });
