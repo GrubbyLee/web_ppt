@@ -165,16 +165,41 @@ try {
   await demoPage.waitForSelector("[data-testid=approval-status-approved]", { timeout: 10_000 });
   assert(true, "审批通过，状态机验证通过（待审批 → 已通过）");
 
-  console.log("8) 圈选标注与观众镜像");
+  console.log("8) 圈选标注：连续画、倒序撤销、按页保留");
   await sidepanel.locator(".panel-page__tools").getByTitle("圈选标注（C）").click();
   const demoBox = await demoPage.locator(".demo-content").boundingBox();
   assert(Boolean(demoBox), "演示页内容区域可定位");
-  await demoPage.mouse.move(demoBox.x + demoBox.width * 0.3, demoBox.y + 80);
-  await demoPage.mouse.down();
-  await demoPage.mouse.move(demoBox.x + demoBox.width * 0.6, demoBox.y + 200, { steps: 6 });
-  await demoPage.mouse.up();
-  await sidepanel.waitForTimeout(800);
-  assert(await demoPage.locator("[data-showit-overlay] .showit-circle").count() === 1, "圈选标注已渲染在演示页");
+  const circleCount = () => demoPage.locator("[data-showit-overlay] .showit-circle").count();
+  const drawCircle = async (offset) => {
+    await demoPage.mouse.move(demoBox.x + demoBox.width * (0.2 + offset), demoBox.y + 80);
+    await demoPage.mouse.down();
+    await demoPage.mouse.move(demoBox.x + demoBox.width * (0.45 + offset), demoBox.y + 200, { steps: 6 });
+    await demoPage.mouse.up();
+    await sidepanel.waitForTimeout(700);
+  };
+  // 连画三笔都不能丢：拖过输入框时浏览器会误判成文本拖选并发 pointercancel。
+  for (const offset of [0, 0.05, 0.1]) await drawCircle(offset);
+  assert(await circleCount() === 3, `连续三次圈选画出 3 个圆（实际 ${await circleCount()}）`);
+
+  const undo = sidepanel.locator(".panel-page__tools").getByTitle(/^撤销最后一个标注/);
+  await undo.click();
+  await sidepanel.waitForTimeout(500);
+  assert(await circleCount() === 2, `撤销一次后剩 2 个（实际 ${await circleCount()}）`);
+  await undo.click();
+  await sidepanel.waitForTimeout(500);
+  assert(await circleCount() === 1, `再撤销一次后剩 1 个（实际 ${await circleCount()}）`);
+
+  // 翻页让位、翻回来恢复：标注按页保存。
+  await sidepanel.locator(".panel-page-nav").getByTitle("下一页").click();
+  await sidepanel.waitForTimeout(1_200);
+  assert(await circleCount() === 0, "翻页后不再显示上一页的标注");
+  await sidepanel.locator(".panel-page-nav").getByTitle("上一页").click();
+  await sidepanel.waitForTimeout(1_500);
+  assert(await circleCount() === 1, `翻回本页后恢复本页标注（实际 ${await circleCount()}）`);
+  assert(await demoPage.locator("[data-showit-overlay] .showit-circle").first().evaluate((node) => getComputedStyle(node).position) === "absolute",
+    "标注带覆盖层样式（不是丢了 CSS 的空元素）");
+
+  console.log("8b) 观众镜像");
 
   const openedAt = Date.now();
   await sidepanel.locator(".panel-group--deliver").getByText("共享画面").click();
