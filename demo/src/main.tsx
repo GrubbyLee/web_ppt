@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -30,6 +30,12 @@ const orders = [
 function readLogin(): boolean {
   try { return window.sessionStorage.getItem("northstar:logged-in") === "1"; } catch { return false; }
 }
+
+function readView(): View {
+  const value = window.location.hash.replace(/^#\/?/, "");
+  return value === "inventory" || value === "orders" || value === "settings" ? value : "overview";
+}
+
 
 function Login({ onLogin }: { onLogin: () => void }) {
   const [account, setAccount] = useState("");
@@ -101,10 +107,23 @@ function Settings() {
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(readLogin);
-  const [view, setView] = useState<View>("overview");
-  if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
-  function logout() { window.sessionStorage.removeItem("northstar:logged-in"); setLoggedIn(false); }
-  return <div className="app-shell"><aside className="sidebar"><div className="side-brand"><span className="brand-mark small">N</span><div><strong>Northstar</strong><small>Supply Operations</small></div></div><nav><button data-testid="nav-overview" className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>运营概览</button><button data-testid="nav-inventory" className={view === "inventory" ? "active" : ""} onClick={() => setView("inventory")}>库存管理</button><button data-testid="nav-orders" className={view === "orders" ? "active" : ""} onClick={() => setView("orders")}>订单中心</button></nav><div className="sidebar-bottom"><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>工作区设置</button></div></aside><main className="main-shell"><header className="topbar"><div className="breadcrumb">杭州仓 <span>/</span> {view === "overview" ? "运营概览" : view === "inventory" ? "库存管理" : view === "orders" ? "订单中心" : "工作区设置"}</div><div className="user-menu"><span className="online-dot" /> 林遥 <button onClick={logout}>退出</button></div></header><div className="content">{view === "overview" ? <Overview setView={setView} /> : view === "inventory" ? <Inventory /> : view === "orders" ? <Orders /> : <Settings />}</div></main></div>;
+  const [view, setView] = useState<View>(readView);
+
+  useEffect(() => {
+    const onHashChange = () => setView(readView());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  function navigate(next: View): void {
+    const hash = next === "overview" ? "#/overview" : `#/${next}`;
+    if (window.location.hash === hash) setView(next);
+    else window.location.hash = hash;
+  }
+
+  if (!loggedIn) return <Login onLogin={() => { setLoggedIn(true); navigate("overview"); }} />;
+  function logout() { window.sessionStorage.removeItem("northstar:logged-in"); setLoggedIn(false); window.location.hash = ""; }
+  return <div className="app-shell"><aside className="sidebar"><div className="side-brand"><span className="brand-mark small">N</span><div><strong>Northstar</strong><small>Supply Operations</small></div></div><nav><button data-testid="nav-overview" className={view === "overview" ? "active" : ""} onClick={() => navigate("overview")}>运营概览</button><button data-testid="nav-inventory" className={view === "inventory" ? "active" : ""} onClick={() => navigate("inventory")}>库存管理</button><button data-testid="nav-orders" className={view === "orders" ? "active" : ""} onClick={() => navigate("orders")}>订单中心</button></nav><div className="sidebar-bottom"><button className={view === "settings" ? "active" : ""} onClick={() => navigate("settings")}>工作区设置</button></div></aside><main className="main-shell"><header className="topbar"><div className="breadcrumb">杭州仓 <span>/</span> {view === "overview" ? "运营概览" : view === "inventory" ? "库存管理" : view === "orders" ? "订单中心" : "工作区设置"}</div><div className="user-menu"><span className="online-dot" /> 林遥 <button onClick={logout}>退出</button></div></header><div className="content">{view === "overview" ? <Overview setView={navigate} /> : view === "inventory" ? <Inventory /> : view === "orders" ? <Orders /> : <Settings />}</div></main></div>;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
