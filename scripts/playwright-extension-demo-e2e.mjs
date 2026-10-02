@@ -124,11 +124,21 @@ try {
   assert(true, "侧边栏显示未登录（连接器状态）");
 
   // 遮罩是给观众用的：演示者在这里框选要挡住的区域。内置演示页也必须支持。
-  await sidepanel.locator(".panel-page__tools").getByTitle("框选隐私遮罩元素").click();
+  const pickMask = sidepanel.locator(".panel-page__tools").getByTitle(/^框选隐私遮罩元素/);
+  await pickMask.click();
+  await sidepanel.waitForTimeout(700);
+  assert((await sidepanel.locator(".panel-message").textContent().catch(() => "") ?? "").includes("点击要遮挡的元素"),
+    "框选遮罩时给出“点击元素 / Esc 取消”的引导");
   await demoPage.locator("[data-testid=login-username]").click();
   await sidepanel.waitForTimeout(1_200);
   const maskCount = await demoPage.locator("[data-showit-overlay] .showit-mask").count();
   assert(maskCount === 1, `演示页上可以框选隐私遮罩（${maskCount} 个）`);
+  // 遮罩会写回项目：必须能在演示中清除误框的那些。
+  const clearMask = sidepanel.locator(".panel-page__tools").getByTitle(/^清除本页/);
+  assert(await clearMask.isVisible(), "本页有遮罩时出现「清除遮罩」按钮");
+  await clearMask.click();
+  await sidepanel.waitForTimeout(900);
+  assert(await demoPage.locator("[data-showit-overlay] .showit-mask").count() === 0, "清除后本页遮罩为空");
 
   console.log("4) 登录步骤链（账号 → 敏感密码 → 登录）");
   const stepButton = (index) => sidepanel.locator(".panel-steps__list .panel-step").nth(index);
