@@ -654,6 +654,22 @@ export function App() {
           remote={meta.remote}
           copied={relayCopied}
           onCopied={() => setRelayCopied(true)}
+          onDiscoverLocal={async () => {
+            for (let port = 8786; port <= 8795; port += 1) {
+              try {
+                const response = await fetch(`http://127.0.0.1:${port}/api/relay`, { cache: "no-store" });
+                const body = await response.json() as { ok?: boolean; relayBaseUrl?: string };
+                if (response.ok && body.ok === true && body.relayBaseUrl) {
+                  setRelayBase(body.relayBaseUrl);
+                  setNotice(`已发现本机中继：${body.relayBaseUrl}`);
+                  return;
+                }
+              } catch {
+                // 尝试下一个本机伴随服务端口。
+              }
+            }
+            setNotice("本机中继未启动，请先运行 npm run relay:companion。");
+          }}
           onOpen={async () => {
             if (!relayBase.trim()) return;
             const base = relayBase.trim();
@@ -857,12 +873,13 @@ function SettingsDrawer({ project, currentPage, preflight, health, healthBusy, d
   );
 }
 
-function RelayDialog({ value, onChange, remote, copied, onCopied, onOpen, onEnd, onCopy, onApprove, onReject, onKick, onClose }: {
+function RelayDialog({ value, onChange, remote, copied, onCopied, onDiscoverLocal, onOpen, onEnd, onCopy, onApprove, onReject, onKick, onClose }: {
   value: string;
   onChange: (value: string) => void;
   remote: RemoteAudienceState | null;
   copied: boolean;
   onCopied: () => void;
+  onDiscoverLocal: () => Promise<void>;
   onOpen: () => void;
   onEnd: () => void;
   onCopy: () => void;
@@ -927,6 +944,7 @@ function RelayDialog({ value, onChange, remote, copied, onCopied, onOpen, onEnd,
             <input autoFocus value={value} placeholder="http://127.0.0.1:8787" onChange={(event) => { onChange(event.target.value); setHealth("idle"); setHealthMessage(""); }} />
           </label>
           <div className="dialog__actions">
+            <ToolbarButton icon="⌂" label="连接本机中继" onClick={() => void onDiscoverLocal()} />
             <ToolbarButton icon="✓" label={health === "checking" ? "检查中…" : "检查连接"} disabled={health === "checking" || !value.trim().startsWith("http")} onClick={() => void checkRelay()} />
             <ToolbarButton icon="🌐" label="开启远程观众" variant="primary" disabled={!value.trim().startsWith("http")} onClick={onOpen} />
           </div>

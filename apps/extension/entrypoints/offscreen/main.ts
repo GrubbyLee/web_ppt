@@ -74,7 +74,10 @@ async function startCapture(streamId: string): Promise<void> {
     post({ type: "capture-state", active: true });
     for (const viewerId of pendingViewers) void addViewer(viewerId);
     pendingViewers.clear();
-    // Relay viewers reconnect on their next answer; nothing to do here.
+    for (const peerId of pendingRelayPeers) {
+      pendingRelayPeers.delete(peerId);
+      void addRelayPeer(peerId);
+    }
     stream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => {
       if (captureStream === stream) stopCapture();
     }, { once: true }));
@@ -151,8 +154,27 @@ async function addRelayPeer(peerId: string): Promise<void> {
   postUi({ type: "relay-signal", to: peerId, from: "publisher", data: { type: "offer", description } });
 }
 
+const pendingRelayPeers = new Set<string>();
+
+function addRelayPeerIfReady(peerId: string): void {
+  pendingRelayPeers.add(peerId);
+  if (audienceStream) {
+    pendingRelayPeers.delete(peerId);
+    void addRelayPeer(peerId);
+  }
+}
+
 function handleRelaySignal(from: string, data: { type?: string; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }): void {
   if (!data || typeof data.type !== "string") return;
+  if (data.type === "join") {
+    addRelayPeerIfReady(from);
+    return;
+  }
+  if (data.type === "leave") {
+    pendingRelayPeers.delete(from);
+    closeRelayPeer(from);
+    return;
+  }
   if (data.type === "offer") {
     // Viewers never send offers through the relay (the publisher does).
     return;

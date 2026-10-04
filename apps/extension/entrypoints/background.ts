@@ -405,6 +405,9 @@ async function openRemoteAudience(relayBaseInput: string): Promise<void> {
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; from?: string; to?: string; description?: unknown; candidate?: unknown };
+        if ((message.type === "join" || message.type === "leave") && message.from) {
+          postToContext("offscreen", { type: "relay-signal", to: message.from, from: message.from, data: { type: message.type } });
+        }
         if (message.type === "answer" || message.type === "ice") {
           postToContext("offscreen", { type: "relay-signal", to: message.to ?? "publisher", from: message.from ?? "", data: message });
         }

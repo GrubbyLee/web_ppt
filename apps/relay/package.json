@@ -6,7 +6,8 @@
   "description": "Showit audience relay: LAN/WAN watch pages for read-only audience screens",
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "start": "node --experimental-strip-types src/main.ts",
+    "start": "tsx src/main.ts",
+    "companion": "tsx src/companion.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

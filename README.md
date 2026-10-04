@@ -20,6 +20,7 @@ npm run typecheck
 npm run demo:dev
 npm run demo:build        # 构建独立业务 Demo
 npm run relay:dev         # 启动本机观众中继（默认 127.0.0.1:8787）
+npm run relay:companion   # 启动本机伴随服务，自动发现中继实际端口
 npm run build:demo-site   # 构建内置示例的中继托管副本
 npm run test           # vitest 单元测试
 npm run build          # wxt build + 体积门禁

@@ -8,9 +8,14 @@ import { sanitizeSignalMessage, MAX_SIGNAL_BYTES, type SignalEnvelope } from "./
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
-const PORT = Number(process.env.SHOWIT_RELAY_PORT ?? 8787);
+const configuredPort = process.env.SHOWIT_RELAY_PORT;
+const configuredBaseUrl = process.env.SHOWIT_RELAY_BASE_URL;
+const PORT = Number(configuredPort ?? 8787);
 const HOST = process.env.SHOWIT_RELAY_HOST ?? "0.0.0.0";
-const BASE_URL = process.env.SHOWIT_RELAY_BASE_URL ?? `http://127.0.0.1:${PORT}`;
+const AUTO_SELECT_PORT = configuredPort === undefined && configuredBaseUrl === undefined;
+const MAX_AUTO_PORT_TRIES = 20;
+let activePort = PORT;
+let activeBaseUrl = configuredBaseUrl ?? `http://127.0.0.1:${PORT}`;
 
 const store = new RoomStore();
 
@@ -66,7 +71,7 @@ route("POST", "/api/rooms", async (request, response) => {
   const body = await readJsonBody(request);
   const capacity = body.capacity === "sfu" ? "sfu" : "p2p";
   const joinMode = body.joinMode === "approval" ? "approval" : "direct";
-  const summary = store.createRoom({ baseUrl: BASE_URL, capacity, joinMode });
+  const summary = store.createRoom({ baseUrl: activeBaseUrl, capacity, joinMode });
   sendJson(response, 201, summary);
 });
 
@@ -178,7 +183,7 @@ route("GET", "/demo/assets/(.+)", (_request, response, match) => {
 });
 
 route("GET", "/health", (_request, response) => {
-  sendJson(response, 200, { ok: true, service: "showit-relay", version: "0.3.0", rooms: store.activeRoomCount(), capabilities: { p2p: true, sfu: false, persistence: false } });
+  sendJson(response, 200, { ok: true, service: "showit-relay", version: "0.3.0", host: HOST, port: activePort, baseUrl: activeBaseUrl, rooms: store.activeRoomCount(), capabilities: { p2p: true, sfu: false, persistence: false } });
 });
 
 const server = createServer(async (request, response) => {
@@ -327,7 +332,7 @@ class SignalSockets {
   /** Notify the presenter that a viewer joined / left (audience bookkeeping). */
   notifyViewerState(roomCode: string, viewer: { viewerId: string; displayName: string; status: string }): void {
     sseChannels.broadcast(roomCode, "viewer-state", viewer);
-    const payload = JSON.stringify({ type: "leave", from: "viewer-state", displayName: viewer.displayName });
+    const payload = JSON.stringify({ type: viewer.status === "connected" ? "join" : "leave", from: viewer.viewerId, displayName: viewer.displayName });
     for (const client of this.roomPeers(roomCode)) {
       if (client.role === "presenter") this.sendTo(client, payload);
     }
@@ -522,26 +527,48 @@ function watchPageHtml(roomCode: string): string {
   return `<!doctype html><html lang="zh-CN"><body style="font-family:system-ui;background:#0d1015;color:#f5f8fb;display:flex;align-items:center;justify-content:center;height:100vh"><p>观众页资源缺失，请检查中继部署。</p></body></html>`;
 }
 
-export function startRelay(port = PORT, host = HOST): Promise<{ close(): Promise<void>; port: number }> {
-  return new Promise((resolveStart) => {
-    server.listen(port, host, () => {
-      const address = server.address();
-      const actualPort = typeof address === "object" && address ? address.port : port;
-      resolveStart({
-        port: actualPort,
-        close: () => new Promise<void>((resolveClose) => {
-          signalSockets.closeAll();
-          wss.close();
-          server.close(() => resolveClose());
-        })
-      });
-    });
+export function startRelay(port = PORT, host = HOST): Promise<{ close(): Promise<void>; port: number; baseUrl: string }> {
+  const autoSelect = AUTO_SELECT_PORT && port > 0;
+  return new Promise((resolveStart, rejectStart) => {
+    let attempts = 0;
+    const listen = (candidatePort: number): void => {
+      const onError = (error: NodeJS.ErrnoException): void => {
+        server.removeListener("listening", onListening);
+        server.removeListener("error", onError);
+        if (autoSelect && error.code === "EADDRINUSE" && attempts < MAX_AUTO_PORT_TRIES) {
+          attempts += 1;
+          listen(candidatePort + 1);
+          return;
+        }
+        rejectStart(error);
+      };
+      const onListening = (): void => {
+        server.removeListener("error", onError);
+        const address = server.address();
+        const actualPort = typeof address === "object" && address ? address.port : candidatePort;
+        activePort = actualPort;
+        if (configuredBaseUrl === undefined) activeBaseUrl = `http://127.0.0.1:${actualPort}`;
+        resolveStart({
+          port: actualPort,
+          baseUrl: activeBaseUrl,
+          close: () => new Promise<void>((resolveClose) => {
+            signalSockets.closeAll();
+            wss.close();
+            server.close(() => resolveClose());
+          })
+        });
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(candidatePort, host);
+    };
+    listen(port);
   });
 }
 
 // Direct-run entry (node src/main.ts).
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"))) {
   startRelay().then(({ port }) => {
-    console.log(`Showit audience relay listening on http://127.0.0.1:${port} (base ${BASE_URL})`);
+    console.log(`Showit audience relay listening on ${activeBaseUrl} (port ${port}${port !== PORT ? `, requested ${PORT} was busy` : ""})`);
   });
 }

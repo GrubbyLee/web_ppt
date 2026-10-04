@@ -98,6 +98,9 @@ describe("relay integration", () => {
     viewer.on("message", (raw) => viewerMessages.push(JSON.parse(String(raw))));
     presenter.on("message", (raw) => presenterMessages.push(JSON.parse(String(raw))));
 
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(presenterMessages.some((message) => message.type === "join" && message.from === "peer-1")).toBe(true);
+
     // Presenter offers to the viewer; the relay forwards it.
     presenter.send(JSON.stringify({ type: "offer", to: "peer-1", from: "publisher-1", description: { type: "offer", sdp: "v=0 demo" } }));
     await new Promise((resolve) => setTimeout(resolve, 150));
