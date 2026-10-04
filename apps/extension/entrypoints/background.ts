@@ -365,7 +365,7 @@ async function openRemoteAudience(relayBaseInput: string): Promise<void> {
   }
   const base = relayBaseInput.trim().replace(/\/$/, "");
   if (!/^https?:\/\/[a-z0-9.:-]+$/i.test(base)) {
-    runtime.message = "中继地址无效，应形如 http://192.168.1.10:8787 。";
+    runtime.message = "中继地址无效，应形如 http://192.168.1.10:8888 。";
     broadcastState();
     return;
   }

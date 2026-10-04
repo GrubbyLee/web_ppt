@@ -10,7 +10,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 const configuredPort = process.env.SHOWIT_RELAY_PORT;
 const configuredBaseUrl = process.env.SHOWIT_RELAY_BASE_URL;
-const PORT = Number(configuredPort ?? 8787);
+const PORT = Number(configuredPort ?? 8888);
 const HOST = process.env.SHOWIT_RELAY_HOST ?? "0.0.0.0";
 const AUTO_SELECT_PORT = configuredPort === undefined && configuredBaseUrl === undefined;
 const MAX_AUTO_PORT_TRIES = 20;

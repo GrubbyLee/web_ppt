@@ -2,10 +2,10 @@ services:
   relay:
     build: .
     ports:
-      - "8787:8787"
+      - "8888:8888"
     environment:
-      SHOWIT_RELAY_PORT: "8787"
+      SHOWIT_RELAY_PORT: "8888"
       SHOWIT_RELAY_HOST: "0.0.0.0"
       # Set to the audience-facing address (LAN IP or public domain):
-      SHOWIT_RELAY_BASE_URL: "http://localhost:8787"
+      SHOWIT_RELAY_BASE_URL: "http://localhost:8888"
     restart: unless-stopped

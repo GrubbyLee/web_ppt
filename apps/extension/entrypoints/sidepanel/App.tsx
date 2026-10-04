@@ -655,7 +655,7 @@ export function App() {
           copied={relayCopied}
           onCopied={() => setRelayCopied(true)}
           onDiscoverLocal={async () => {
-            for (let port = 8786; port <= 8795; port += 1) {
+            for (let port = 9999; port <= 10008; port += 1) {
               try {
                 const response = await fetch(`http://127.0.0.1:${port}/api/relay`, { cache: "no-store" });
                 const body = await response.json() as { ok?: boolean; relayBaseUrl?: string };
@@ -941,7 +941,7 @@ function RelayDialog({ value, onChange, remote, copied, onCopied, onDiscoverLoca
           <p>填写 Showit 中继服务地址。中继只转发已合成的观众画面，不访问业务系统。</p>
           <label className="field">
             <span>中继地址</span>
-            <input autoFocus value={value} placeholder="http://127.0.0.1:8787" onChange={(event) => { onChange(event.target.value); setHealth("idle"); setHealthMessage(""); }} />
+            <input autoFocus value={value} placeholder="http://127.0.0.1:8888" onChange={(event) => { onChange(event.target.value); setHealth("idle"); setHealthMessage(""); }} />
           </label>
           <div className="dialog__actions">
             <ToolbarButton icon="⌂" label="连接本机中继" onClick={() => void onDiscoverLocal()} />
