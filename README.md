@@ -15,7 +15,7 @@ v0.2.0 完成了从 Tauri 桌面端到纯浏览器扩展的架构重写（见 [v
 
 ```bash
 npm install
-npm run dev            # WXT 开发模式
+npm run dev            # WXT 开发模式（http://localhost:6666）
 npm run typecheck
 npm run demo:dev
 npm run demo:build        # 构建独立业务 Demo

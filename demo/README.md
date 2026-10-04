@@ -13,7 +13,7 @@ npm ci
 npm run demo:dev
 ```
 
-服务地址：`http://127.0.0.1:3001`
+服务地址：`http://127.0.0.1:7777`
 
 ## 演示账号
 
@@ -21,7 +21,7 @@ npm run demo:dev
 
 ## 导入 Showit
 
-在 Showit 项目库中导入本目录的 `Northstar_Supply_Demo.showit`，再运行该项目。项目连接器指向 `http://127.0.0.1:3001`，包含登录、敏感密码、运营概览和库存管理步骤。
+在 Showit 项目库中导入本目录的 `Northstar_Supply_Demo.showit`，再运行该项目。项目连接器指向 `http://127.0.0.1:7777`，包含登录、敏感密码、运营概览和库存管理步骤。
 
 ## 构建
 

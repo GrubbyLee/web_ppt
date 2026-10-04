@@ -40,7 +40,7 @@
       {
         "id": "northstar-local",
         "name": "Northstar Supply 本地 Demo",
-        "origin": "http://127.0.0.1:3001",
+        "origin": "http://127.0.0.1:7777",
         "mode": "window",
         "permission": "automate",
         "securityMode": "interactive",
@@ -51,7 +51,7 @@
         "logoutPaths": ["/"],
         "roleSwitchPaths": [],
         "sandboxPermissions": [],
-        "allowedOrigins": ["http://127.0.0.1:3001"]
+        "allowedOrigins": ["http://127.0.0.1:7777"]
       }
     ],
     "pages": [
@@ -68,7 +68,7 @@
         "errorHandling": "确认 demo 服务已通过 npm run demo:dev 启动。",
         "role": "运营经理",
         "businessLabel": "Northstar Supply 登录页",
-        "url": "http://127.0.0.1:3001/#/overview",
+        "url": "http://127.0.0.1:7777/#/overview",
         "privacyMasks": [],
         "variables": [],
         "connectorId": "northstar-local",
@@ -103,7 +103,7 @@
               "conditionTimeoutSeconds": 8
             }
           ],
-          "fallback": "如果登录失败，请确认独立 Demo 正在 127.0.0.1:3001 运行。"
+          "fallback": "如果登录失败，请确认独立 Demo 正在 127.0.0.1:7777 运行。"
         }
       },
       {
@@ -119,7 +119,7 @@
         "errorHandling": "检查登录状态和 Demo 服务。",
         "role": "运营经理",
         "businessLabel": "Northstar Supply 运营概览",
-        "url": "http://127.0.0.1:3001/#/overview",
+        "url": "http://127.0.0.1:7777/#/overview",
         "privacyMasks": [],
         "variables": [],
         "connectorId": "northstar-local",
@@ -139,7 +139,7 @@
         "errorHandling": "确认页面已完成登录。",
         "role": "运营经理",
         "businessLabel": "Northstar Supply 库存管理",
-        "url": "http://127.0.0.1:3001/#/inventory",
+        "url": "http://127.0.0.1:7777/#/inventory",
         "privacyMasks": [],
         "variables": [],
         "connectorId": "northstar-local",
