@@ -5,6 +5,7 @@ import { PackagePasswordError, createProject, createSession, downloadProjectPack
 import { createProjectSnapshot, deleteWorkspace, ensureSampleWorkspace, listProjectVersions, listWorkspaces, saveWorkspace, setActiveProject, type Workspace } from "@/lib/persistence";
 import { forgetProjectTrust, inspectProjectImport, projectTrustState, trustProject, type ProjectImportReview } from "@/lib/project-trust";
 import { recordDiagnostic } from "@/lib/diagnostics";
+import { runProjectPreflight, type PreflightReport } from "@/lib/preflight";
 import { beginPresentationLaunch } from "@/lib/presentation-launch";
 import { ToolbarButton } from "@/components/ToolbarButton";
 import type { WorkbenchPort } from "./App";
@@ -75,6 +76,7 @@ export function Library({
   const [pendingImport, setPendingImport] = useState<Project | null>(null);
   const [importReview, setImportReview] = useState<ProjectImportReview | null>(null);
   const [pendingRun, setPendingRun] = useState<Workspace | null>(null);
+  const [pendingPreflight, setPendingPreflight] = useState<{ workspace: Workspace; report: PreflightReport } | null>(null);
   const [launching, setLaunching] = useState(false);
 
   useEffect(() => {
@@ -152,6 +154,16 @@ export function Library({
   };
 
   const runProject = async (workspace: Workspace) => {
+    const report = runProjectPreflight(workspace.project);
+    if (report.errors.length > 0) {
+      setPendingPreflight({ workspace, report });
+      return;
+    }
+    if (report.warnings.length > 0) setMessage(`演示前提醒：${report.warnings.length} 项，请在设置中查看。`);
+    await launchTrustedProject(workspace);
+  };
+
+  const launchTrustedProject = async (workspace: Workspace) => {
     if (await projectTrustState(workspace.project) !== "trusted") {
       setPendingRun(workspace);
       return;
@@ -431,10 +443,25 @@ export function Library({
         </div>
       ) : null}
 
+      {pendingPreflight !== null ? (
+        <div className="dialog-backdrop" role="presentation">
+          <div className="dialog" role="dialog" aria-modal="true" aria-label="演前检查">
+            <h2>{pendingPreflight.report.errors.length > 0 ? "暂不能开始演示" : "演前检查提醒"}</h2>
+            <p><strong>{pendingPreflight.workspace.project.name}</strong>：开始前发现 {pendingPreflight.report.errors.length > 0 ? `${pendingPreflight.report.errors.length} 个错误` : `${pendingPreflight.report.warnings.length + " 个提醒"}`}。</p>
+            <section className="panel-settings__preflight" aria-label="演前检查结果">
+              {pendingPreflight.report.items.filter((item) => item.state !== "ok").slice(0, 8).map((item) => <p key={item.id} data-state={item.state}>{item.message}</p>)}
+            </section>
+            <div className="dialog__actions">
+              <ToolbarButton icon="✕" label="返回修改" onClick={() => setPendingPreflight(null)} />
+              {pendingPreflight.report.errors.length === 0 ? <ToolbarButton icon={<Play size={14} />} label="确认并运行" variant="primary" onClick={() => void (async () => { const workspace = pendingPreflight.workspace; setPendingPreflight(null); await launchTrustedProject(workspace); })()} /> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {pendingRun !== null ? (
         <div className="dialog-backdrop" role="presentation">
           <div className="dialog" role="dialog" aria-modal="true" aria-label="项目需要信任">
-            <h2>项目需要信任</h2>
             {pendingRun ? <p><strong>{pendingRun.project.name}</strong> 尚未信任或内容与上次信任的哈希不一致。重新确认后将更新本机信任记录。</p> : null}
             <div className="dialog__actions">
               <ToolbarButton icon="✕" label="取消" onClick={() => setPendingRun(null)} />

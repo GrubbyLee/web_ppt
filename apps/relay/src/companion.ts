@@ -34,7 +34,20 @@ const server = createServer((request, response) => {
 });
 
 function listenCompanion(port: number, attempts = 0): void {
-  const onError = (error: NodeJS.ErrnoException): void => {
+  const onError = async (error: NodeJS.ErrnoException): Promise<void> => {
+    if (error.code === "EADDRINUSE") {
+      try {
+        const response = await fetch(`http://${COMPANION_HOST}:${port}/health`, { signal: AbortSignal.timeout(500) });
+        const body = await response.json() as { service?: string; relayBaseUrl?: string };
+        if (response.ok && body.service === "showit-relay-companion") {
+          console.log(`Showit Relay Companion 已在 http://${COMPANION_HOST}:${port} 运行，复用现有实例。`);
+          await relay.close();
+          process.exit(0);
+        }
+      } catch {
+        // 端口占用者不是 Companion，继续尝试下一个端口。
+      }
+    }
     if (error.code === "EADDRINUSE" && attempts < MAX_COMPANION_PORT_TRIES) {
       listenCompanion(port + 1, attempts + 1);
       return;

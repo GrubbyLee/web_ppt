@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { freshProfileDir } from "./e2e-profile.mjs";
@@ -15,7 +16,21 @@ import { freshProfileDir } from "./e2e-profile.mjs";
 const root = resolve(import.meta.dirname, "..");
 const extensionDir = resolve(root, "apps/extension/.output/chrome-mv3");
 const resultsDir = resolve(root, "test-results");
-const relayPort = 8899;
+
+async function findFreePort() {
+  const probe = createServer();
+  await new Promise((resolvePort, reject) => {
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => resolvePort());
+  });
+  const address = probe.address();
+  const port = typeof address === "object" && address ? address.port : null;
+  await new Promise((resolveClose, rejectClose) => probe.close((error) => error ? rejectClose(error) : resolveClose()));
+  if (!port) throw new Error("无法分配远程 E2E 中继端口。");
+  return port;
+}
+
+const relayPort = await findFreePort();
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(`断言失败：${message}`);
@@ -26,10 +41,12 @@ const relay = spawn("npx", ["tsx", "src/main.ts"], {
   cwd: resolve(root, "apps/relay"),
   shell: false,
   env: { ...process.env, SHOWIT_RELAY_PORT: String(relayPort), SHOWIT_RELAY_BASE_URL: `http://127.0.0.1:${relayPort}` },
-  stdio: ["ignore", "pipe", "pipe"]
+  stdio: ["ignore", "pipe", "pipe"],
+  detached: true
 });
 relay.stdout.on("data", (chunk) => process.stdout.write(`[relay] ${chunk}`));
 relay.stderr.on("data", (chunk) => process.stderr.write(`[relay!] ${chunk}`));
+const relayExit = new Promise((resolveExit) => relay.once("exit", resolveExit));
 
 const relayReady = new Promise((resolveReady, rejectReady) => {
   const started = Date.now();
@@ -50,6 +67,11 @@ const presenter = await chromium.launchPersistentContext(await freshProfileDir("
   args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`, "--no-first-run"]
 });
 const viewer = await chromium.launch({ headless: true });
+let e2ePassed = false;
+
+async function closeWithTimeout(close, timeoutMs = 3_000) {
+  await Promise.race([close(), new Promise((resolveClose) => setTimeout(resolveClose, timeoutMs))]);
+}
 
 try {
   await relayReady;
@@ -177,8 +199,15 @@ try {
   assert(relayRoomGone === 404, `中继房间在结束后不可访问（/watch 状态 ${relayRoomGone}）`);
 
   console.log("远程观众端到端验证通过。");
+  e2ePassed = true;
 } finally {
-  await presenter.close();
-  await viewer.close();
-  try { process.kill(-relay.pid, "SIGTERM"); } catch { /* already gone */ }
+  await closeWithTimeout(() => presenter.close());
+  await closeWithTimeout(() => viewer.close());
+  try {
+    if (relay.pid) process.kill(-relay.pid, "SIGTERM");
+    else relay.kill("SIGTERM");
+  } catch { /* already gone */ }
+  await Promise.race([relayExit, new Promise((resolveExit) => setTimeout(resolveExit, 3_000))]);
 }
+
+if (e2ePassed) process.exit(0);
