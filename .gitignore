@@ -14,4 +14,5 @@ apps/extension/.output/
 apps/extension/.wxt/
 apps/extension/release/
 apps/relay/public/demo/
+apps/relay/release/
 apps/extension/dev/

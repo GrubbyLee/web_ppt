@@ -23,6 +23,8 @@
     "test:remote-e2e": "node scripts/playwright-remote-e2e.mjs",
     "relay:dev": "npm run dev -w @showit/relay",
     "relay:companion": "npm run companion -w @showit/relay",
+    "start:local": "node scripts/start-local.mjs",
+    "package:companion": "node scripts/package-relay-companion.mjs",
     "build:demo-site": "npm run build -w @showit/demo-site",
     "demo:dev": "npm run dev -w showit-independent-demo",
     "demo:build": "npm run build -w showit-independent-demo",

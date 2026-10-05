@@ -3,6 +3,7 @@ import { defineConfig } from "wxt";
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   srcDir: ".",
+  dev: { server: { port: 6666, strictPort: true } },
   manifest: {
     name: "Showit",
     short_name: "Showit",

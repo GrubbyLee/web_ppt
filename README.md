@@ -1,8 +1,6 @@
 # Showit
 
-Showit 是本地优先的网页演示工作台，以 **Chrome 扩展**（WXT / Manifest V3）形式交付：业务页面在真实浏览器标签页中运行，演讲者在浏览器**侧边栏控制台**中编排讲稿、步骤、计时、标注与画面投送。
-
-v0.2.0 完成了从 Tauri 桌面端到纯浏览器扩展的架构重写（见 [v0.2.0 架构重写方案](docs/v0.2.0-架构重写方案.md)）。v0.1 项目包（`.showit`）可直接导入。
+Showit 以 **Chrome 扩展**（WXT / Manifest V3）形式交付：业务页面在真实浏览器标签页中运行，主讲人在浏览器**侧边栏控制台**中编排讲稿、步骤、计时、标注与画面投送。当前产品基线见 [当前实现说明](docs/当前实现说明.md)。
 
 ## 安装
 
@@ -17,10 +15,8 @@ v0.2.0 完成了从 Tauri 桌面端到纯浏览器扩展的架构重写（见 [v
 npm install
 npm run dev            # WXT 开发模式（http://localhost:6666）
 npm run typecheck
-npm run demo:dev
-npm run demo:build        # 构建独立业务 Demo
-npm run relay:dev         # 启动本机观众中继（默认 127.0.0.1:8888）
-npm run relay:companion   # 启动本机伴随服务，自动发现中继实际端口（默认 127.0.0.1:9999）
+npm run start:local     # 一键启动独立 Demo、Companion 和 Showit 开发扩展
+npm run package:companion # 打包本机 Relay Companion 交付包
 npm run build:demo-site   # 构建内置示例的中继托管副本
 npm run test           # vitest 单元测试
 npm run build          # wxt build + 体积门禁
@@ -69,8 +65,8 @@ packages/contracts              # 项目/页面/步骤/连接器/版本/排练 Z
 
 ## 使用与交付文档
 
+- [当前实现说明](docs/当前实现说明.md)
 - [用户手册](docs/用户手册.md)
-- [v0.2.0 架构重写方案](docs/v0.2.0-架构重写方案.md)
 - [发布与回滚](docs/发布与回滚.md)
 
 源码主仓库为 `https://gitee.com/287198991/showit.git`。仓库中的 GitHub Actions 工作流用于 GitHub 镜像或兼容 Runner；仅推送到 Gitee 不会自动执行该工作流，发布前仍须按发布文档执行门禁。
